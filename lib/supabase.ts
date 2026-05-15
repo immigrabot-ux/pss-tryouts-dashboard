@@ -1,0 +1,75 @@
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
+
+/**
+ * Server-side Supabase client using the service role key.
+ * NEVER import this from a Client Component.
+ */
+let _serverClient: SupabaseClient | null = null;
+
+export function getSupabaseAdmin(): SupabaseClient {
+  if (_serverClient) return _serverClient;
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !serviceKey) {
+    throw new Error(
+      "Missing Supabase env vars. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+    );
+  }
+
+  _serverClient = createClient(url, serviceKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+
+  return _serverClient;
+}
+
+/**
+ * Public anon client — usable from the browser. Reads are gated by RLS.
+ * We mostly use service-role on the server, but this is here for completeness.
+ */
+export function getSupabaseAnon(): SupabaseClient {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !anonKey) {
+    throw new Error(
+      "Missing Supabase env vars. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
+    );
+  }
+
+  return createClient(url, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+// Shared type — mirrors the `leads` table in Supabase.
+export type Lead = {
+  id: string;
+  created_at: string;
+  parent_name: string;
+  player_name: string;
+  player_age: number;
+  parent_phone: string;
+  parent_email: string;
+  whatsapp_opt_in: boolean;
+  whatsapp_confirmed: boolean;
+  whatsapp_confirmed_at?: string | null;
+  status: string;
+  tryout_date: string | null;
+  notes: string | null;
+};
+
+export type LeadActivity = {
+  id: string;
+  lead_id: string;
+  created_at: string;
+  channel: "email" | "whatsapp" | "system";
+  kind: string;
+  detail: string | null;
+  success: boolean;
+};
