@@ -52,6 +52,11 @@ function buildTryoutICS(lead: Lead): Promise<string | null> {
       description: `Peace Soccer School Fall 2026 Tryout for ${lead.player_name} (age ${lead.player_age}). See you on the pitch! — Coach Mina`,
       location,
       start: [year, month, day, hour || 9, minute || 0],
+      // "local" tells the ics library not to convert times to UTC.
+      // Without this, Vercel (running in UTC) emits the time as UTC and
+      // viewers in ET see the event 4–5 hours earlier than intended.
+      startInputType: "local",
+      startOutputType: "local",
       duration: { hours: 2 },
       status: "CONFIRMED",
       busyStatus: "BUSY",
@@ -84,12 +89,18 @@ function welcomeEmailHTML(lead: Lead): string {
   const location =
     process.env.TRYOUT_LOCATION || "Bliss Fields, Rehoboth MA";
 
-  const niceDate = new Date(`${date}T${time}:00`).toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  // Treat the date as ET-anchored, not parsed as UTC.
+  const [yr, mo, dy] = date.split("-").map((n) => parseInt(n, 10));
+  const niceDate = new Date(Date.UTC(yr, mo - 1, dy)).toLocaleDateString(
+    "en-US",
+    {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      timeZone: "UTC",
+    }
+  );
 
   return `<!doctype html>
 <html>
