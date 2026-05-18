@@ -32,13 +32,17 @@ export async function GET(
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  const { data: activities } = await supabase
+  const { data: activities, error: activitiesError } = await supabase
     .from("lead_activities")
     .select("*")
     .eq("lead_id", params.id)
     .order("created_at", { ascending: false });
 
-  return NextResponse.json({ lead, activities: activities || [] });
+  return NextResponse.json({
+    lead,
+    activities: activities || [],
+    activitiesError: activitiesError ? activitiesError.message : null,
+  });
 }
 
 /**

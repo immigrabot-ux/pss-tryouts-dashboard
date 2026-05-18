@@ -155,13 +155,18 @@ export async function sendWhatsAppText(
 }
 
 /**
- * Strip everything that isn't a digit. Returns null if too short.
+ * Strip everything that isn't a digit, then ensure the country code is present.
  * WhatsApp expects E.164 *without* the leading "+".
+ *
+ * Heuristic: if the result is exactly 10 digits, assume US and prepend "1".
+ * Numbers 11+ digits long are assumed to already include their country code.
  */
 export function normalizePhone(phone: string): string | null {
   if (!phone) return null;
-  const digits = phone.replace(/\D+/g, "");
+  let digits = phone.replace(/\D+/g, "");
   if (digits.length < 8) return null;
+  // US default — 10-digit numbers get a "1" prefix.
+  if (digits.length === 10) digits = "1" + digits;
   return digits;
 }
 
