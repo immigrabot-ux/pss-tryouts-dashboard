@@ -14,13 +14,15 @@ export type WATemplateParam = string;
  * @param toPhone     Recipient phone in E.164 format (e.g. "15085551234"). Leading "+" is stripped.
  * @param templateName Name of the approved template in Meta Business Manager.
  * @param params      Ordered list of body parameters that fill the {{1}}, {{2}}, ... placeholders.
- * @param languageCode Language code of the template, defaults to "en_US".
+ * @param languageCode Language code of the template. Defaults to "en" — Meta lists
+ *                    templates created under "English" with code `en`, NOT `en_US`.
+ *                    Override if you actually created the template under English (US).
  */
 export async function sendWhatsAppTemplate(
   toPhone: string,
   templateName: string,
   params: WATemplateParam[] = [],
-  languageCode: string = "en_US"
+  languageCode: string = "en"
 ): Promise<{ ok: boolean; messageId?: string; error?: string; raw?: unknown }> {
   const token = process.env.WHATSAPP_ACCESS_TOKEN;
   const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
