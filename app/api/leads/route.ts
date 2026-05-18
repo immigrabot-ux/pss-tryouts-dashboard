@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { sendWelcomeEmail } from "@/lib/email";
+import { sendWhatsAppTemplate } from "@/lib/whatsapp";
 import { logActivity } from "@/lib/activity";
 import { isAdminPassword, unauthorized } from "@/lib/auth";
 
@@ -115,17 +116,36 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Fire-and-forget welcome email — do NOT block the response.
-  // We use setImmediate so the request can return before SMTP completes.
+  // Fire-and-forget welcome email + WhatsApp template — do NOT block the response.
   Promise.resolve().then(async () => {
-    const result = await sendWelcomeEmail(data);
+    // 1) Welcome email with .ics invite
+    const emailResult = await sendWelcomeEmail(data);
     await logActivity(
       data.id,
       "email",
       "welcome",
-      result.ok ? null : result.error || "unknown error",
-      result.ok
+      emailResult.ok ? null : emailResult.error || "unknown error",
+      emailResult.ok
     );
+
+    // 2) Welcome WhatsApp template (only if parent opted in)
+    //    This template kickstarts the WhatsApp conversation. Once the parent
+    //    replies, we're inside the 24-hour service window and AI auto-reply
+    //    takes over.
+    if (data.whatsapp_opt_in) {
+      const waResult = await sendWhatsAppTemplate(
+        data.parent_phone,
+        "pss_welcome",
+        [data.parent_name, data.player_name]
+      );
+      await logActivity(
+        data.id,
+        "whatsapp",
+        "welcome",
+        waResult.ok ? null : waResult.error || "unknown error",
+        waResult.ok
+      );
+    }
   });
 
   return withCORS(
