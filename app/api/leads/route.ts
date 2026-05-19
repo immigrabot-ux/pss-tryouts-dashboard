@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { sendWelcomeEmail } from "@/lib/email";
+import { sendWelcomeEmail, sendAdminNotification } from "@/lib/email";
 import { sendWhatsAppTemplate } from "@/lib/whatsapp";
 import { logActivity } from "@/lib/activity";
 import { isAdminPassword, unauthorized } from "@/lib/auth";
@@ -147,37 +147,53 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Fire-and-forget welcome email + WhatsApp template — do NOT block the response.
-  Promise.resolve().then(async () => {
-    // 1) Welcome email with .ics invite
-    const emailResult = await sendWelcomeEmail(data);
-    await logActivity(
+  // IMPORTANT: Vercel kills serverless functions the moment the response is sent,
+  // so any `Promise.resolve().then(...)` background work would be silently dropped.
+  // We AWAIT everything here. Form submission takes ~3–5 seconds — acceptable
+  // tradeoff for reliable email + WhatsApp delivery.
+  //
+  // Run the three side-effects in parallel for speed.
+  const [emailResult, adminResult, waResult] = await Promise.all([
+    sendWelcomeEmail(data),
+    sendAdminNotification(data),
+    data.whatsapp_opt_in
+      ? sendWhatsAppTemplate(data.parent_phone, "pss_welcome", [
+          data.parent_name,
+          data.player_name,
+        ])
+      : Promise.resolve({ ok: true } as { ok: boolean; error?: string }),
+  ]);
+
+  // Log each result (also awaited — but soft-fails so it won't throw).
+  await Promise.all([
+    logActivity(
       data.id,
       "email",
       "welcome",
       emailResult.ok ? null : emailResult.error || "unknown error",
       emailResult.ok
-    );
+    ),
+    logActivity(
+      data.id,
+      "email",
+      "admin_notification",
+      adminResult.ok ? null : adminResult.error || "unknown error",
+      adminResult.ok
+    ),
+    data.whatsapp_opt_in
+      ? logActivity(
+          data.id,
+          "whatsapp",
+          "welcome",
+          waResult.ok ? null : (waResult as any).error || "unknown error",
+          waResult.ok
+        )
+      : Promise.resolve(),
+  ]);
 
-    // 2) Welcome WhatsApp template (only if parent opted in)
-    //    This template kickstarts the WhatsApp conversation. Once the parent
-    //    replies, we're inside the 24-hour service window and AI auto-reply
-    //    takes over.
-    if (data.whatsapp_opt_in) {
-      const waResult = await sendWhatsAppTemplate(
-        data.parent_phone,
-        "pss_welcome",
-        [data.parent_name, data.player_name]
-      );
-      await logActivity(
-        data.id,
-        "whatsapp",
-        "welcome",
-        waResult.ok ? null : waResult.error || "unknown error",
-        waResult.ok
-      );
-    }
-  });
+  console.log(
+    `[/api/leads] lead ${data.id} created — email:${emailResult.ok} admin:${adminResult.ok} wa:${waResult.ok}`
+  );
 
   return withCORS(
     NextResponse.json(

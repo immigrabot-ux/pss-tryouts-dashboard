@@ -9,6 +9,21 @@ export const dynamic = "force-dynamic";
  * Useful for confirming env vars made it to Vercel after deploy.
  */
 export async function GET() {
+  // Show a masked preview of ADMIN_NOTIFY_EMAIL so we can verify it's the
+  // value we expect, without revealing it fully if there are multiple recipients.
+  const adminNotifyEmail = (process.env.ADMIN_NOTIFY_EMAIL || "").trim();
+  const adminEmailPreview = adminNotifyEmail
+    ? adminNotifyEmail
+        .split(",")
+        .map((e) => {
+          const [user, domain] = e.trim().split("@");
+          if (!user || !domain) return "(malformed)";
+          const u = user.length <= 2 ? user[0] + "*" : user.slice(0, 2) + "***";
+          return `${u}@${domain}`;
+        })
+        .join(", ")
+    : null;
+
   const checks = {
     NEXT_PUBLIC_SUPABASE_URL: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
@@ -21,6 +36,8 @@ export async function GET() {
     WHATSAPP_VERIFY_TOKEN: !!process.env.WHATSAPP_VERIFY_TOKEN,
     ADMIN_PASSWORD: !!process.env.ADMIN_PASSWORD,
     ADMIN_PASSWORD_length: (process.env.ADMIN_PASSWORD || "").trim().length,
+    ADMIN_NOTIFY_EMAIL: !!adminNotifyEmail,
+    ADMIN_NOTIFY_EMAIL_preview: adminEmailPreview,
     ANTHROPIC_API_KEY: !!process.env.ANTHROPIC_API_KEY,
     AI_AUTO_REPLY_ENABLED: process.env.AI_AUTO_REPLY_ENABLED || null,
     TRYOUT_DATE: process.env.TRYOUT_DATE || null,

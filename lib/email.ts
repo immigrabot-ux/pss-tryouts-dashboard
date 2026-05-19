@@ -172,6 +172,69 @@ function escapeHTML(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * Notify the admin (Coach Mina) that a new lead just signed up.
+ * Fires alongside the welcome email — non-blocking, soft-fail.
+ *
+ * Recipient is ADMIN_NOTIFY_EMAIL if set, otherwise falls back to SMTP_USER.
+ * Comma-separate multiple recipients if you want to notify a team.
+ */
+export async function sendAdminNotification(
+  lead: Lead
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const to = process.env.ADMIN_NOTIFY_EMAIL || process.env.SMTP_USER;
+    if (!to) {
+      return { ok: false, error: "No ADMIN_NOTIFY_EMAIL or SMTP_USER set" };
+    }
+
+    const transport = getTransport();
+
+    const selLabel = selectionLabel(lead.tryout_day);
+    const dashUrl = `https://pss-tryouts-system.vercel.app/admin/leads/${lead.id}`;
+
+    const html = `<!doctype html>
+<html><body style="margin:0;padding:0;background:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#f5f5f5;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a0a;padding:24px 16px;">
+<tr><td align="center">
+  <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#111;border:1px solid #1f1f1f;border-radius:12px;overflow:hidden;">
+    <tr><td style="background:#DC2626;padding:18px 24px;">
+      <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#fecaca;font-weight:600;">PSS · New tryout signup</div>
+      <div style="font-size:20px;font-weight:700;color:#fff;margin-top:4px;">${escapeHTML(lead.player_name)} <span style="font-weight:400;opacity:0.8;">— ${escapeHTML(lead.age_group || `age ${lead.player_age}`)}</span></div>
+    </td></tr>
+    <tr><td style="padding:20px 24px;">
+      <table cellpadding="0" cellspacing="0" style="width:100%;font-size:14px;color:#d4d4d4;">
+        <tr><td style="padding:6px 0;color:#a3a3a3;width:120px;">Parent</td><td style="padding:6px 0;color:#fff;">${escapeHTML(lead.parent_name)}</td></tr>
+        <tr><td style="padding:6px 0;color:#a3a3a3;">Phone</td><td style="padding:6px 0;"><a href="https://wa.me/${lead.parent_phone.replace(/\D/g, "")}" style="color:#34d399;text-decoration:none;">${escapeHTML(lead.parent_phone)}</a></td></tr>
+        <tr><td style="padding:6px 0;color:#a3a3a3;">Email</td><td style="padding:6px 0;"><a href="mailto:${escapeHTML(lead.parent_email)}" style="color:#60a5fa;text-decoration:none;">${escapeHTML(lead.parent_email)}</a></td></tr>
+        <tr><td style="padding:6px 0;color:#a3a3a3;">Days</td><td style="padding:6px 0;color:#fff;">${escapeHTML(selLabel)}</td></tr>
+        <tr><td style="padding:6px 0;color:#a3a3a3;">WhatsApp</td><td style="padding:6px 0;color:#fff;">${lead.whatsapp_opt_in ? "✓ opted in" : "not opted in"}</td></tr>
+      </table>
+      <div style="margin-top:20px;">
+        <a href="${dashUrl}" style="display:inline-block;background:#DC2626;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;">View in dashboard →</a>
+      </div>
+    </td></tr>
+  </table>
+</td></tr>
+</table>
+</body></html>`;
+
+    const info = await transport.sendMail({
+      from: `"PSS Tryouts" <${FROM_EMAIL}>`,
+      to,
+      subject: `New PSS signup: ${lead.player_name} (${lead.age_group || `age ${lead.player_age}`}) — ${selectionLabel(lead.tryout_day)}`,
+      html,
+    });
+
+    console.log("[email] admin notification sent to", to, info.messageId);
+    return { ok: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[email] sendAdminNotification failed:", message);
+    return { ok: false, error: message };
+  }
+}
+
 export async function sendWelcomeEmail(lead: Lead): Promise<{ ok: boolean; error?: string }> {
   try {
     const transport = getTransport();
