@@ -61,6 +61,10 @@ export type Lead = {
   whatsapp_confirmed_at?: string | null;
   status: string;
   tryout_date: string | null;
+  /** Which day(s) the parent selected: "day1" | "day2" | "both". */
+  tryout_day?: "day1" | "day2" | "both" | string | null;
+  /** Original age-group label, e.g. "U10 (9-10 yrs)". Numeric age is in player_age. */
+  age_group?: string | null;
   notes: string | null;
 };
 

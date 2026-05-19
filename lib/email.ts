@@ -1,6 +1,12 @@
 import nodemailer from "nodemailer";
-import { createEvent, EventAttributes } from "ics";
+import { createEvents, EventAttributes } from "ics";
 import type { Lead } from "./supabase";
+import {
+  TRYOUT_DAYS,
+  TRYOUT_LOCATION,
+  daysForSelection,
+  selectionLabel,
+} from "./tryout-config";
 
 const FROM_NAME = "Peace Soccer School";
 // SMTP_FROM lets us authenticate as info@ but send "From:" as the tryouts@ alias.
@@ -29,50 +35,48 @@ function getTransport() {
 }
 
 /**
- * Build a .ics calendar invite for the tryout.
- * Returns a Promise resolving to the raw .ics text or null on failure.
+ * Build a .ics calendar invite covering BOTH tryout days.
+ * Generates two events in a single .ics file so the parent's calendar app
+ * imports them as two distinct entries.
  */
 function buildTryoutICS(lead: Lead): Promise<string | null> {
   return new Promise((resolve) => {
-    const date = lead.tryout_date || process.env.TRYOUT_DATE || "2026-08-15";
-    const time = process.env.TRYOUT_TIME || "09:00";
-    const location =
-      process.env.TRYOUT_LOCATION || "Bliss Fields, Rehoboth MA";
+    const days = daysForSelection(lead.tryout_day);
+    const events: EventAttributes[] = days.map((day, idx) => {
+      const [year, month, dom] = day.date.split("-").map((n) => parseInt(n, 10));
+      const durationHours = day.endHour - day.startHour;
+      const durationMinutes = day.endMinute - day.startMinute;
 
-    const [year, month, day] = date.split("-").map((n) => parseInt(n, 10));
-    const [hour, minute] = time.split(":").map((n) => parseInt(n, 10));
-
-    if (!year || !month || !day) {
-      resolve(null);
-      return;
-    }
-
-    const event: EventAttributes = {
-      title: `PSS Tryout — ${lead.player_name}`,
-      description: `Peace Soccer School Fall 2026 Tryout for ${lead.player_name} (age ${lead.player_age}). See you on the pitch! — Coach Mina`,
-      location,
-      start: [year, month, day, hour || 9, minute || 0],
-      // "local" tells the ics library not to convert times to UTC.
-      // Without this, Vercel (running in UTC) emits the time as UTC and
-      // viewers in ET see the event 4–5 hours earlier than intended.
-      startInputType: "local",
-      startOutputType: "local",
-      duration: { hours: 2 },
-      status: "CONFIRMED",
-      busyStatus: "BUSY",
-      organizer: { name: "Coach Mina", email: FROM_EMAIL },
-      attendees: [
-        {
-          name: lead.parent_name,
-          email: lead.parent_email,
-          rsvp: true,
-          partstat: "NEEDS-ACTION",
-          role: "REQ-PARTICIPANT",
+      return {
+        title: `PSS Tryout ${day.label} — ${lead.player_name}`,
+        description: `Peace Soccer School Fall 2026 Tryout (${day.label} of 2) for ${lead.player_name} (age ${lead.player_age}). ${day.displayTime}. See you on the pitch! — Coach Mina`,
+        location: TRYOUT_LOCATION,
+        start: [year, month, dom, day.startHour, day.startMinute],
+        // "local" → ics library emits the time as floating local time, so
+        // viewers see "10am" regardless of Vercel's UTC server timezone.
+        startInputType: "local",
+        startOutputType: "local",
+        duration: {
+          hours: durationHours,
+          minutes: durationMinutes,
         },
-      ],
-    };
+        status: "CONFIRMED",
+        busyStatus: "BUSY",
+        organizer: { name: "Coach Mina", email: FROM_EMAIL },
+        attendees: [
+          {
+            name: lead.parent_name,
+            email: lead.parent_email,
+            rsvp: true,
+            partstat: "NEEDS-ACTION",
+            role: "REQ-PARTICIPANT",
+          },
+        ],
+        uid: `pss-tryout-${lead.id}-day${idx + 1}@peacesoccerschool.com`,
+      };
+    });
 
-    createEvent(event, (error, value) => {
+    createEvents(events, (error, value) => {
       if (error) {
         console.error("[email] ics build error:", error);
         resolve(null);
@@ -84,23 +88,20 @@ function buildTryoutICS(lead: Lead): Promise<string | null> {
 }
 
 function welcomeEmailHTML(lead: Lead): string {
-  const date = lead.tryout_date || process.env.TRYOUT_DATE || "2026-08-15";
-  const time = process.env.TRYOUT_TIME || "09:00";
-  const location =
-    process.env.TRYOUT_LOCATION || "Bliss Fields, Rehoboth MA";
+  const selectedDays = daysForSelection(lead.tryout_day);
+  const multiDay = selectedDays.length > 1;
+  const intro = multiDay
+    ? "Tryouts run over <strong>two days</strong>:"
+    : `You're signed up for <strong>${selectedDays[0].label}</strong>:`;
 
-  // Treat the date as ET-anchored, not parsed as UTC.
-  const [yr, mo, dy] = date.split("-").map((n) => parseInt(n, 10));
-  const niceDate = new Date(Date.UTC(yr, mo - 1, dy)).toLocaleDateString(
-    "en-US",
-    {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      timeZone: "UTC",
-    }
-  );
+  const daysHTML = selectedDays.map(
+    (day) => `
+      <div style="background:#0a0a0a;border:1px solid #1f1f1f;border-radius:10px;padding:18px 20px;margin:0 0 12px;">
+        <div style="font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#DC2626;font-weight:700;margin-bottom:8px;">${escapeHTML(day.label)}</div>
+        <div style="font-size:18px;font-weight:600;color:#fff;margin-bottom:6px;">${escapeHTML(day.displayDate)}</div>
+        <div style="font-size:14px;color:#a3a3a3;">⏰ ${escapeHTML(day.displayTime)}</div>
+      </div>`
+  ).join("");
 
   return `<!doctype html>
 <html>
@@ -121,14 +122,10 @@ function welcomeEmailHTML(lead: Lead): string {
                   Hi ${escapeHTML(lead.parent_name)},
                 </p>
                 <p style="margin:0 0 16px;font-size:16px;line-height:1.6;color:#e5e5e5;">
-                  Thank you for signing <strong>${escapeHTML(lead.player_name)}</strong> up for our Fall 2026 tryout — we can't wait to see them on the field. This is going to be a really special season for PSS, and your family is part of it.
+                  Thank you for signing <strong>${escapeHTML(lead.player_name)}</strong> up for our Fall 2026 tryout — we can't wait to see them on the field. ${intro}
                 </p>
-                <div style="background:#0a0a0a;border:1px solid #1f1f1f;border-radius:10px;padding:18px 20px;margin:20px 0;">
-                  <div style="font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#DC2626;font-weight:700;margin-bottom:10px;">Your tryout</div>
-                  <div style="font-size:18px;font-weight:600;color:#fff;margin-bottom:6px;">${escapeHTML(niceDate)}</div>
-                  <div style="font-size:14px;color:#a3a3a3;margin-bottom:4px;">⏰ ${escapeHTML(time)}</div>
-                  <div style="font-size:14px;color:#a3a3a3;">📍 ${escapeHTML(location)}</div>
-                </div>
+                ${daysHTML}
+                <div style="font-size:14px;color:#a3a3a3;margin:14px 0 20px;">📍 ${escapeHTML(TRYOUT_LOCATION)}${multiDay ? " (both days)" : ""}</div>
                 <p style="margin:0 0 8px;font-size:16px;font-weight:600;color:#fff;">What to bring</p>
                 <ul style="margin:0 0 20px;padding-left:20px;font-size:15px;line-height:1.7;color:#d4d4d4;">
                   <li>Cleats and shin guards</li>
@@ -144,7 +141,7 @@ function welcomeEmailHTML(lead: Lead): string {
                     : ""
                 }
                 <p style="margin:20px 0 16px;font-size:15px;line-height:1.6;color:#d4d4d4;">
-                  I've attached a calendar invite — add it now so you don't miss it. If anything comes up, just reply to this email.
+                  I've attached ${multiDay ? "calendar invites for both days" : "a calendar invite"} — add ${multiDay ? "them" : "it"} now so you don't miss anything. If anything comes up, just reply to this email.
                 </p>
                 <p style="margin:0;font-size:15px;line-height:1.6;color:#d4d4d4;">
                   See you on the pitch,<br/>

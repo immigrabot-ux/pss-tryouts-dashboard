@@ -16,7 +16,15 @@ type Lead = {
   whatsapp_confirmed_at?: string | null;
   status: string;
   tryout_date: string | null;
+  tryout_day?: string | null;
+  age_group?: string | null;
   notes: string | null;
+};
+
+const DAY_BADGE: Record<string, { label: string; cls: string }> = {
+  day1: { label: "Day 1", cls: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
+  day2: { label: "Day 2", cls: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30" },
+  both: { label: "Both", cls: "bg-pss-red/15 text-red-300 border-pss-red/30" },
 };
 
 const STATUSES = [
@@ -244,6 +252,8 @@ function Dashboard({
       "parent_name",
       "player_name",
       "player_age",
+      "age_group",
+      "tryout_day",
       "parent_phone",
       "parent_email",
       "whatsapp_opt_in",
@@ -354,6 +364,7 @@ function Dashboard({
                   <th className="px-4 py-3 font-medium">Created</th>
                   <th className="px-4 py-3 font-medium">Parent</th>
                   <th className="px-4 py-3 font-medium">Player</th>
+                  <th className="px-4 py-3 font-medium">Day</th>
                   <th className="px-4 py-3 font-medium">Phone</th>
                   <th className="px-4 py-3 font-medium">Email</th>
                   <th className="px-4 py-3 font-medium">WhatsApp</th>
@@ -366,7 +377,7 @@ function Dashboard({
                 {loading && (
                   <tr>
                     <td
-                      colSpan={9}
+                      colSpan={10}
                       className="px-4 py-10 text-center text-neutral-500"
                     >
                       Loading leads…
@@ -376,7 +387,7 @@ function Dashboard({
                 {!loading && filtered.length === 0 && (
                   <tr>
                     <td
-                      colSpan={9}
+                      colSpan={10}
                       className="px-4 py-10 text-center text-neutral-500"
                     >
                       No leads match your filters.
@@ -474,7 +485,22 @@ function LeadRow({
         <td className="px-4 py-3 font-medium">{lead.parent_name}</td>
         <td className="px-4 py-3">
           <div>{lead.player_name}</div>
-          <div className="text-xs text-neutral-500">age {lead.player_age}</div>
+          <div className="text-xs text-neutral-500">
+            {lead.age_group || `age ${lead.player_age}`}
+          </div>
+        </td>
+        <td className="px-4 py-3">
+          {(() => {
+            const key = (lead.tryout_day || "both").toLowerCase();
+            const badge = DAY_BADGE[key] || DAY_BADGE.both;
+            return (
+              <span
+                className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${badge.cls}`}
+              >
+                {badge.label}
+              </span>
+            );
+          })()}
         </td>
         <td className="px-4 py-3">
           <a
@@ -562,13 +588,20 @@ function LeadRow({
       </tr>
       {expanded && (
         <tr className="bg-black/20 border-b border-pss-border/50">
-          <td colSpan={9} className="px-6 py-4">
+          <td colSpan={10} className="px-6 py-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <Field label="Lead ID" value={lead.id} />
               <Field
-                label="Tryout date"
-                value={lead.tryout_date || "—"}
+                label="Days attending"
+                value={
+                  lead.tryout_day === "day1"
+                    ? "Day 1 only (Sat Jul 25)"
+                    : lead.tryout_day === "day2"
+                    ? "Day 2 only (Sun Jul 26)"
+                    : "Both days (Jul 25 & 26)"
+                }
               />
+              <Field label="Age group" value={lead.age_group || `age ${lead.player_age}`} />
               <Field
                 label="WhatsApp confirmed at"
                 value={
@@ -576,10 +609,6 @@ function LeadRow({
                     ? formatDate(lead.whatsapp_confirmed_at)
                     : "—"
                 }
-              />
-              <Field
-                label="Created"
-                value={new Date(lead.created_at).toLocaleString()}
               />
             </div>
             <div className="mt-4">

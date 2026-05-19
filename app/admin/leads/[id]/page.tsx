@@ -17,8 +17,21 @@ type Lead = {
   whatsapp_confirmed_at?: string | null;
   status: string;
   tryout_date: string | null;
+  tryout_day?: string | null;
+  age_group?: string | null;
   notes: string | null;
 };
+
+function daySelectionLabel(d?: string | null): string {
+  switch ((d || "both").toLowerCase()) {
+    case "day1":
+      return "Day 1 only — Saturday, Jul 25 (10 AM – 12 PM)";
+    case "day2":
+      return "Day 2 only — Sunday, Jul 26 (4 PM – 6 PM)";
+    default:
+      return "Both days — Jul 25 (10 AM) & Jul 26 (4 PM)";
+  }
+}
 
 type Activity = {
   id: string;
@@ -277,9 +290,12 @@ export default function LeadDetailPage() {
                   }
                 />
                 <Row
-                  label="Tryout date"
-                  value={lead.tryout_date || "—"}
+                  label="Days attending"
+                  value={daySelectionLabel(lead.tryout_day)}
                 />
+                {lead.age_group && (
+                  <Row label="Age group" value={lead.age_group} />
+                )}
                 <Row
                   label="Submitted"
                   value={new Date(lead.created_at).toLocaleString()}

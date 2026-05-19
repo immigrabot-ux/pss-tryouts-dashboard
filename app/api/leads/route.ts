@@ -47,6 +47,9 @@ export async function POST(req: NextRequest) {
   const parent_phone = str(body.parent_phone);
   const parent_email = str(body.parent_email);
   const whatsapp_opt_in = Boolean(body.whatsapp_opt_in);
+  // Day selection — "day1" | "day2" | "both". Default to "both".
+  let tryout_day = str(body.tryout_day).toLowerCase();
+  if (!["day1", "day2", "both"].includes(tryout_day)) tryout_day = "both";
 
   // validation
   const missing: string[] = [];
@@ -66,15 +69,36 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const player_age =
-    typeof player_age_raw === "number"
-      ? player_age_raw
-      : parseInt(String(player_age_raw), 10);
+  // Accept either a numeric age (9, 13) or an age-group label like
+  // "U10 (9-10 yrs)" / "U10" / "U-12". Extract the U-number as upper bound.
+  let player_age: number = NaN;
+  if (typeof player_age_raw === "number") {
+    player_age = player_age_raw;
+  } else {
+    const raw = String(player_age_raw || "").trim();
+    // Match "U" + number, prioritized — that's the age-group convention
+    const uMatch = raw.match(/u\s*-?\s*(\d{1,2})/i);
+    if (uMatch) {
+      player_age = parseInt(uMatch[1], 10);
+    } else {
+      // Fallback — just grab the first integer in the string
+      const numMatch = raw.match(/\d{1,2}/);
+      if (numMatch) player_age = parseInt(numMatch[0], 10);
+    }
+  }
+
+  // Capture the original age-group label (e.g. "U10 (9-10 yrs)") if present
+  const age_group =
+    typeof player_age_raw === "string" ? player_age_raw.trim() : null;
 
   if (Number.isNaN(player_age) || player_age < 3 || player_age > 25) {
     return withCORS(
       NextResponse.json(
-        { error: "invalid_player_age", message: "Age must be between 3 and 25." },
+        {
+          error: "invalid_player_age",
+          message: "Age must be between 3 and 25 (or an age group like U10).",
+          received: player_age_raw,
+        },
         { status: 400 }
       )
     );
@@ -88,7 +112,12 @@ export async function POST(req: NextRequest) {
 
   const supabase = getSupabaseAdmin();
 
-  const insertRow = {
+  // Anchor lead's tryout_date on the first day they're attending — used by
+  // the reminder cron to bucket T-3 / T-1 / today.
+  const anchorDate =
+    tryout_day === "day2" ? "2026-07-26" : "2026-07-25";
+
+  const insertRow: Record<string, unknown> = {
     parent_name,
     player_name,
     player_age,
@@ -97,8 +126,10 @@ export async function POST(req: NextRequest) {
     whatsapp_opt_in,
     whatsapp_confirmed: false,
     status: "new",
-    tryout_date: process.env.TRYOUT_DATE || null,
+    tryout_date: anchorDate,
+    tryout_day,
   };
+  if (age_group) insertRow.age_group = age_group;
 
   const { data, error } = await supabase
     .from("leads")

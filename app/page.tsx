@@ -1,4 +1,5 @@
 import TryoutForm from "./_components/TryoutForm";
+import { TRYOUT_DAYS, TRYOUT_LOCATION } from "@/lib/tryout-config";
 
 export default function Home() {
   return (
@@ -21,14 +22,29 @@ export default function Home() {
             <span className="text-pss-red">Tryout</span> starts here
           </h1>
           <p className="text-neutral-400 text-lg leading-relaxed">
-            Sign your player up below — we'll lock in their tryout date,
-            send a calendar invite, and follow up on WhatsApp with everything
-            you need to know.
+            Two days of tryouts — sign your player up below. We'll send a
+            calendar invite covering both sessions and follow up on WhatsApp.
           </p>
           <div className="space-y-3 pt-2">
-            <Detail icon="📅" label="Tryout date" value="August 15, 2026" />
-            <Detail icon="⏰" label="Time" value="9:00 AM" />
-            <Detail icon="📍" label="Location" value="Bliss Fields, Rehoboth MA" />
+            {TRYOUT_DAYS.map((day) => (
+              <DayCard
+                key={day.label}
+                label={day.label}
+                date={day.displayDate}
+                time={day.displayTime}
+              />
+            ))}
+            <div className="flex items-center gap-3 pt-1">
+              <div className="w-10 h-10 rounded-lg bg-pss-panel border border-pss-border flex items-center justify-center text-lg">
+                📍
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-wider text-neutral-500">
+                  Location (both days)
+                </div>
+                <div className="font-medium">{TRYOUT_LOCATION}</div>
+              </div>
+            </div>
           </div>
           <div className="text-sm text-neutral-500 pt-4 border-t border-pss-border">
             Questions? Coach Mina will reach out personally after you sign up.
@@ -44,25 +60,26 @@ export default function Home() {
   );
 }
 
-function Detail({
-  icon,
+function DayCard({
   label,
-  value,
+  date,
+  time,
 }: {
-  icon: string;
   label: string;
-  value: string;
+  date: string;
+  time: string;
 }) {
   return (
-    <div className="flex items-center gap-3">
-      <div className="w-10 h-10 rounded-lg bg-pss-panel border border-pss-border flex items-center justify-center text-lg">
-        {icon}
+    <div className="flex items-start gap-3 bg-pss-panel/40 border border-pss-border rounded-lg p-3">
+      <div className="w-10 h-10 rounded-lg bg-pss-red/15 border border-pss-red/30 flex items-center justify-center text-pss-red font-bold text-sm">
+        {label.replace(/Day /, "")}
       </div>
       <div>
-        <div className="text-xs uppercase tracking-wider text-neutral-500">
+        <div className="text-xs uppercase tracking-wider text-pss-red font-semibold">
           {label}
         </div>
-        <div className="font-medium">{value}</div>
+        <div className="font-medium">{date}</div>
+        <div className="text-sm text-neutral-400">{time}</div>
       </div>
     </div>
   );

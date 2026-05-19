@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 type FormState = {
+  tryout_day: "day1" | "day2" | "both";
   parent_name: string;
   player_name: string;
   player_age: string;
@@ -12,6 +13,7 @@ type FormState = {
 };
 
 const initial: FormState = {
+  tryout_day: "both",
   parent_name: "",
   player_name: "",
   player_age: "",
@@ -60,6 +62,7 @@ export default function TryoutForm() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          tryout_day: form.tryout_day,
           parent_name: form.parent_name.trim(),
           player_name: form.player_name.trim(),
           player_age: age,
@@ -124,6 +127,36 @@ export default function TryoutForm() {
         <p className="text-sm text-neutral-500">
           Takes 30 seconds. We'll never spam you.
         </p>
+      </div>
+
+      <div className="space-y-2">
+        <div className="text-xs uppercase tracking-wider text-neutral-500">
+          Which day(s) will you attend?
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <DayPick
+            active={form.tryout_day === "day1"}
+            onClick={() => update("tryout_day", "day1")}
+            label="Day 1"
+            sub="Sat, Jul 25"
+            time="10 AM – 12 PM"
+          />
+          <DayPick
+            active={form.tryout_day === "day2"}
+            onClick={() => update("tryout_day", "day2")}
+            label="Day 2"
+            sub="Sun, Jul 26"
+            time="4 PM – 6 PM"
+          />
+          <DayPick
+            active={form.tryout_day === "both"}
+            onClick={() => update("tryout_day", "both")}
+            label="Both"
+            sub="Jul 25 & 26"
+            time="Recommended"
+            recommended
+          />
+        </div>
       </div>
 
       <Field
@@ -203,6 +236,54 @@ export default function TryoutForm() {
         the tryout. Peace Soccer School · Rehoboth, MA
       </p>
     </form>
+  );
+}
+
+function DayPick({
+  active,
+  onClick,
+  label,
+  sub,
+  time,
+  recommended,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  sub: string;
+  time: string;
+  recommended?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-left px-3 py-2.5 rounded-lg border transition relative ${
+        active
+          ? "border-pss-red bg-pss-red/10"
+          : "border-pss-border bg-black/30 hover:border-neutral-600"
+      }`}
+    >
+      <div
+        className={`text-[10px] uppercase tracking-wider font-bold ${
+          active ? "text-pss-red" : "text-neutral-500"
+        }`}
+      >
+        {label}
+      </div>
+      <div className="text-sm font-medium leading-tight mt-0.5">{sub}</div>
+      <div className="text-[11px] text-neutral-500 mt-0.5">{time}</div>
+      {recommended && !active && (
+        <div className="absolute top-1.5 right-1.5 text-[9px] text-pss-red font-semibold">
+          ★
+        </div>
+      )}
+      {active && (
+        <div className="absolute top-1.5 right-1.5 w-3.5 h-3.5 rounded-full bg-pss-red text-white flex items-center justify-center text-[10px]">
+          ✓
+        </div>
+      )}
+    </button>
   );
 }
 
