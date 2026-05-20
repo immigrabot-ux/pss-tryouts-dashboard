@@ -26,9 +26,57 @@ export default function TryoutForm() {
   const [form, setForm] = useState<FormState>(initial);
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [waNudge, setWaNudge] = useState<
+    | { kind: "idle" }
+    | { kind: "sending" }
+    | { kind: "sent"; phone: string }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
+  const [lastVerifiedPhone, setLastVerifiedPhone] = useState<string>("");
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  /**
+   * Fire the pss_welcome template as soon as we have a plausible phone number
+   * AND the parent has opted in — even before they finish filling the form.
+   * Triggered on phone-field blur to avoid sending on every keystroke.
+   */
+  async function tryVerifyWhatsApp() {
+    const phone = form.parent_phone.trim();
+    if (!form.whatsapp_opt_in) return;
+    if (!phone || phone.replace(/\D/g, "").length < 10) return;
+    if (phone === lastVerifiedPhone) return; // already verified this exact number
+
+    setWaNudge({ kind: "sending" });
+    try {
+      const res = await fetch("/api/whatsapp/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parent_name: form.parent_name || "there",
+          player_name: form.player_name || "your player",
+          parent_phone: phone,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.ok) {
+        setLastVerifiedPhone(phone);
+        setWaNudge({ kind: "sent", phone });
+      } else {
+        setWaNudge({
+          kind: "error",
+          message:
+            data.message || data.error || "Couldn't reach this number on WhatsApp.",
+        });
+      }
+    } catch (err) {
+      setWaNudge({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Network error",
+      });
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -183,14 +231,34 @@ export default function TryoutForm() {
         />
       </div>
 
-      <Field
-        label="Your phone (for WhatsApp)"
-        value={form.parent_phone}
-        onChange={(v) => update("parent_phone", v)}
-        placeholder="+1 508 555 1234"
-        inputMode="tel"
-        autoComplete="tel"
-      />
+      <div>
+        <Field
+          label="Your phone (for WhatsApp)"
+          value={form.parent_phone}
+          onChange={(v) => update("parent_phone", v)}
+          placeholder="+1 508 555 1234"
+          inputMode="tel"
+          autoComplete="tel"
+          onBlur={tryVerifyWhatsApp}
+        />
+        {waNudge.kind === "sending" && (
+          <div className="mt-1.5 text-xs text-neutral-500 flex items-center gap-1.5">
+            <span className="w-1 h-1 rounded-full bg-amber-400 animate-pulse" />
+            Sending you a WhatsApp to check…
+          </div>
+        )}
+        {waNudge.kind === "sent" && (
+          <div className="mt-1.5 text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-md px-2 py-1.5">
+            📱 We just sent you a WhatsApp — check your phone. Reply YES to lock
+            in your spot.
+          </div>
+        )}
+        {waNudge.kind === "error" && (
+          <div className="mt-1.5 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-md px-2 py-1.5">
+            ⚠️ {waNudge.message}
+          </div>
+        )}
+      </div>
 
       <Field
         label="Your email"
@@ -291,6 +359,7 @@ function Field({
   label,
   value,
   onChange,
+  onBlur,
   placeholder,
   type = "text",
   inputMode,
@@ -299,6 +368,7 @@ function Field({
   label: string;
   value: string;
   onChange: (v: string) => void;
+  onBlur?: () => void;
   placeholder?: string;
   type?: string;
   inputMode?: "text" | "numeric" | "tel" | "email" | "url" | "search" | "none" | "decimal";
@@ -313,6 +383,7 @@ function Field({
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
         placeholder={placeholder}
         inputMode={inputMode}
         autoComplete={autoComplete}

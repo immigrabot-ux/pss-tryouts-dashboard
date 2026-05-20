@@ -18,6 +18,8 @@ type Lead = {
   tryout_date: string | null;
   tryout_day?: string | null;
   age_group?: string | null;
+  whatsapp_send_status?: string | null;
+  whatsapp_send_error?: string | null;
   notes: string | null;
 };
 
@@ -521,26 +523,60 @@ function LeadRow({
           </a>
         </td>
         <td className="px-4 py-3">
-          <div className="flex items-center gap-1.5">
-            {lead.whatsapp_opt_in ? (
+          {(() => {
+            if (!lead.whatsapp_opt_in)
+              return <span className="text-xs text-neutral-600">—</span>;
+
+            // Confirmed (parent has replied at least once)
+            if (lead.whatsapp_confirmed) {
+              return (
+                <span
+                  title={`Confirmed ${
+                    lead.whatsapp_confirmed_at
+                      ? `at ${new Date(lead.whatsapp_confirmed_at).toLocaleString()}`
+                      : ""
+                  }`}
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                >
+                  ✓ Confirmed
+                </span>
+              );
+            }
+
+            // Failed to send
+            if (lead.whatsapp_send_status === "failed") {
+              return (
+                <span
+                  title={lead.whatsapp_send_error || "Send failed"}
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider bg-red-500/15 text-red-300 border border-red-500/40"
+                >
+                  ✗ Send failed
+                </span>
+              );
+            }
+
+            // Sent but waiting for reply
+            if (lead.whatsapp_send_status === "sent") {
+              return (
+                <span
+                  title="Welcome template sent — waiting for parent to reply"
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                >
+                  ⏳ Sent · awaiting reply
+                </span>
+              );
+            }
+
+            // Opted in but template hasn't fired yet (or not tracked)
+            return (
               <span
-                title="Opted in for WhatsApp"
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                title="Opted in but template send not yet recorded"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider bg-blue-500/10 text-blue-300 border border-blue-500/30"
               >
                 Opt-in
               </span>
-            ) : (
-              <span className="text-xs text-neutral-600">—</span>
-            )}
-            {lead.whatsapp_confirmed && (
-              <span
-                title="Replied to confirm"
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-              >
-                ✓ Confirmed
-              </span>
-            )}
-          </div>
+            );
+          })()}
         </td>
         <td className="px-4 py-3">
           <select

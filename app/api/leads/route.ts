@@ -191,6 +191,20 @@ export async function POST(req: NextRequest) {
       : Promise.resolve(),
   ]);
 
+  // Persist the WhatsApp send outcome on the lead itself so the dashboard
+  // can show a clear delivery-status badge per row.
+  if (data.whatsapp_opt_in) {
+    const status = waResult.ok ? "sent" : "failed";
+    const error = waResult.ok ? null : (waResult as any).error || "unknown error";
+    await supabase
+      .from("leads")
+      .update({
+        whatsapp_send_status: status,
+        whatsapp_send_error: error,
+      })
+      .eq("id", data.id);
+  }
+
   console.log(
     `[/api/leads] lead ${data.id} created — email:${emailResult.ok} admin:${adminResult.ok} wa:${waResult.ok}`
   );

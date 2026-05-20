@@ -130,6 +130,7 @@ async function handleInbound(fromDigits: string, text: string) {
         whatsapp_confirmed: true,
         whatsapp_confirmed_at: new Date().toISOString(),
         whatsapp_opt_in: true,
+        whatsapp_send_status: "confirmed",
       })
       .eq("id", lead.id);
 

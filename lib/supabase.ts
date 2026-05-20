@@ -65,6 +65,10 @@ export type Lead = {
   tryout_day?: "day1" | "day2" | "both" | string | null;
   /** Original age-group label, e.g. "U10 (9-10 yrs)". Numeric age is in player_age. */
   age_group?: string | null;
+  /** Delivery status of the welcome WhatsApp template. */
+  whatsapp_send_status?: "sent" | "failed" | "confirmed" | string | null;
+  /** Last Meta error message if the send failed. */
+  whatsapp_send_error?: string | null;
   notes: string | null;
 };
 
