@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import AnalyticsPanel from "./_components/AnalyticsPanel";
 
 type Lead = {
   id: string;
@@ -192,18 +193,6 @@ function Dashboard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const stats = useMemo(() => {
-    const total = leads.length;
-    const byStatus = (s: string) => leads.filter((l) => l.status === s).length;
-    return {
-      total,
-      newCount: byStatus("new"),
-      confirmed: leads.filter((l) => l.whatsapp_confirmed).length,
-      attended: byStatus("attended"),
-      registered: byStatus("registered"),
-    };
-  }, [leads]);
-
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return leads.filter((l) => {
@@ -317,17 +306,7 @@ function Dashboard({
       </header>
 
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-        <section className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <StatCard label="Total leads" value={stats.total} />
-          <StatCard label="New" value={stats.newCount} accent="blue" />
-          <StatCard
-            label="WA Confirmed"
-            value={stats.confirmed}
-            accent="emerald"
-          />
-          <StatCard label="Attended" value={stats.attended} accent="purple" />
-          <StatCard label="Registered" value={stats.registered} accent="red" />
-        </section>
+        <AnalyticsPanel leads={leads} password={password} />
 
         <section className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
@@ -419,34 +398,6 @@ function Dashboard({
         </div>
       </div>
     </main>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  accent = "default",
-}: {
-  label: string;
-  value: number;
-  accent?: "default" | "blue" | "emerald" | "purple" | "red";
-}) {
-  const accentMap: Record<string, string> = {
-    default: "text-white",
-    blue: "text-blue-400",
-    emerald: "text-emerald-400",
-    purple: "text-purple-400",
-    red: "text-pss-red",
-  };
-  return (
-    <div className="bg-pss-panel border border-pss-border rounded-xl p-4">
-      <div className="text-xs uppercase tracking-wider text-neutral-500">
-        {label}
-      </div>
-      <div className={`text-3xl font-bold mt-1 ${accentMap[accent]}`}>
-        {value}
-      </div>
-    </div>
   );
 }
 
