@@ -101,14 +101,45 @@ export async function POST(req: NextRequest) {
   ]);
 
   if (!result.ok) {
-    console.warn("[verify] template send failed:", result.error);
+    console.warn("[verify] template send failed:", result.error, result.raw);
+
+    // Decode Meta's specific error so we don't blame the user's number
+    // for issues that are actually on our side (rate limits, etc.)
+    const metaCode = (result.raw as any)?.error?.code;
+    const metaSubcode = (result.raw as any)?.error?.error_subcode;
+    let userMessage: string;
+    let category: string;
+
+    if (metaCode === 131026) {
+      userMessage = "This number doesn't appear to have WhatsApp installed.";
+      category = "not_on_whatsapp";
+    } else if (metaCode === 131047 || metaCode === 131049) {
+      // Frequency cap / re-engagement limit
+      userMessage =
+        "You'll still get reminders and updates — we just couldn't send the welcome message right now.";
+      category = "marketing_throttled";
+    } else if (metaCode === 131056) {
+      userMessage =
+        "Too many messages to this number recently. You'll still get reminders.";
+      category = "rate_limited";
+    } else if (metaCode === 190 || metaSubcode === 463) {
+      userMessage = "Server config issue — we'll follow up by email instead.";
+      category = "auth_error";
+    } else {
+      userMessage =
+        "Couldn't send the WhatsApp preview, but you'll still get email + reminders.";
+      category = "unknown";
+    }
+
     return withCORS(
       NextResponse.json(
         {
           ok: false,
           error: result.error,
-          message:
-            "We couldn't reach this number on WhatsApp. Double-check the number, or make sure it's a WhatsApp-enabled phone.",
+          meta_code: metaCode,
+          meta_subcode: metaSubcode,
+          category,
+          message: userMessage,
         },
         { status: 200 }
       )
