@@ -21,6 +21,7 @@ type Lead = {
   age_group?: string | null;
   whatsapp_send_status?: string | null;
   whatsapp_send_error?: string | null;
+  source?: string | null;
   notes: string | null;
 };
 
@@ -28,6 +29,11 @@ const DAY_BADGE: Record<string, { label: string; cls: string }> = {
   day1: { label: "Day 1", cls: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
   day2: { label: "Day 2", cls: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30" },
   both: { label: "Both", cls: "bg-pss-red/15 text-red-300 border-pss-red/30" },
+};
+
+const SOURCE_BADGE: Record<string, { label: string; cls: string }> = {
+  website: { label: "Website", cls: "bg-blue-500/15 text-blue-300 border-blue-500/30" },
+  meta_lead_ad: { label: "Meta Lead Ad", cls: "bg-orange-500/15 text-orange-300 border-orange-500/30" },
 };
 
 const STATUSES = [
@@ -167,6 +173,7 @@ function Dashboard({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -197,6 +204,7 @@ function Dashboard({
     const q = search.trim().toLowerCase();
     return leads.filter((l) => {
       if (statusFilter !== "all" && l.status !== statusFilter) return false;
+      if (sourceFilter !== "all" && (l.source || "website") !== sourceFilter) return false;
       if (!q) return true;
       return (
         l.parent_name.toLowerCase().includes(q) ||
@@ -205,7 +213,7 @@ function Dashboard({
         l.parent_email.toLowerCase().includes(q)
       );
     });
-  }, [leads, statusFilter, search]);
+  }, [leads, statusFilter, sourceFilter, search]);
 
   async function patchLead(id: string, patch: Partial<Lead>) {
     setLeads((prev) =>
@@ -318,6 +326,15 @@ function Dashboard({
             />
           </div>
           <select
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value)}
+            className="bg-pss-panel border border-pss-border rounded-md px-3 py-2.5 text-sm focus:border-pss-red outline-none"
+          >
+            <option value="all">All sources</option>
+            <option value="website">Website</option>
+            <option value="meta_lead_ad">Meta Lead Ad</option>
+          </select>
+          <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="bg-pss-panel border border-pss-border rounded-md px-3 py-2.5 text-sm focus:border-pss-red outline-none"
@@ -346,6 +363,7 @@ function Dashboard({
                   <th className="px-4 py-3 font-medium">Parent</th>
                   <th className="px-4 py-3 font-medium">Player</th>
                   <th className="px-4 py-3 font-medium">Day</th>
+                  <th className="px-4 py-3 font-medium">Source</th>
                   <th className="px-4 py-3 font-medium">Phone</th>
                   <th className="px-4 py-3 font-medium">Email</th>
                   <th className="px-4 py-3 font-medium">WhatsApp</th>
@@ -358,7 +376,7 @@ function Dashboard({
                 {loading && (
                   <tr>
                     <td
-                      colSpan={10}
+                      colSpan={11}
                       className="px-4 py-10 text-center text-neutral-500"
                     >
                       Loading leads…
@@ -368,7 +386,7 @@ function Dashboard({
                 {!loading && filtered.length === 0 && (
                   <tr>
                     <td
-                      colSpan={10}
+                      colSpan={11}
                       className="px-4 py-10 text-center text-neutral-500"
                     >
                       No leads match your filters.
@@ -446,6 +464,19 @@ function LeadRow({
           {(() => {
             const key = (lead.tryout_day || "both").toLowerCase();
             const badge = DAY_BADGE[key] || DAY_BADGE.both;
+            return (
+              <span
+                className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${badge.cls}`}
+              >
+                {badge.label}
+              </span>
+            );
+          })()}
+        </td>
+        <td className="px-4 py-3">
+          {(() => {
+            const source = lead.source || "website";
+            const badge = SOURCE_BADGE[source] || SOURCE_BADGE.website;
             return (
               <span
                 className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${badge.cls}`}
@@ -575,7 +606,7 @@ function LeadRow({
       </tr>
       {expanded && (
         <tr className="bg-black/20 border-b border-pss-border/50">
-          <td colSpan={10} className="px-6 py-4">
+          <td colSpan={11} className="px-6 py-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <Field label="Lead ID" value={lead.id} />
               <Field

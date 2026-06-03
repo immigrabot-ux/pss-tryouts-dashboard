@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { sendWelcomeEmail } from "@/lib/email";
-import { sendWhatsAppTemplate } from "@/lib/whatsapp";
+import { sendWhatsAppTemplate, WELCOME_TEMPLATE_NAME } from "@/lib/whatsapp";
 import { logActivity } from "@/lib/activity";
 import { isAdminPassword, unauthorized } from "@/lib/auth";
 
@@ -54,7 +54,7 @@ export async function POST(
   if (action === "welcome_whatsapp") {
     const r = await sendWhatsAppTemplate(
       lead.parent_phone,
-      "pss_welcome",
+      WELCOME_TEMPLATE_NAME,
       [lead.parent_name, lead.player_name]
     );
     await logActivity(

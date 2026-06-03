@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sendWhatsAppTemplate, normalizePhone } from "@/lib/whatsapp";
+import {
+  sendWhatsAppTemplate,
+  normalizePhone,
+  WELCOME_TEMPLATE_NAME,
+} from "@/lib/whatsapp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -95,10 +99,11 @@ export async function POST(req: NextRequest) {
   }
   recentSends.set(normalized, now);
 
-  const result = await sendWhatsAppTemplate(parent_phone, "pss_welcome", [
-    parent_name,
-    player_name,
-  ]);
+  const result = await sendWhatsAppTemplate(
+    parent_phone,
+    WELCOME_TEMPLATE_NAME,
+    [parent_name, player_name]
+  );
 
   if (!result.ok) {
     console.warn("[verify] template send failed:", result.error, result.raw);

@@ -9,6 +9,14 @@ const GRAPH_VERSION = "v18.0";
 export type WATemplateParam = string;
 
 /**
+ * Name of the "welcome" template to fire on signup + manual welcome sends.
+ * Env-overridable so you can swap to a new template version (e.g. after
+ * resubmitting under the Utility category) without touching code.
+ */
+export const WELCOME_TEMPLATE_NAME =
+  process.env.WHATSAPP_WELCOME_TEMPLATE || "pss_welcome";
+
+/**
  * Send a templated WhatsApp message via Meta Graph API.
  *
  * @param toPhone     Recipient phone in E.164 format (e.g. "15085551234"). Leading "+" is stripped.

@@ -10,6 +10,7 @@ type Lead = {
   whatsapp_send_status?: string | null;
   status: string;
   tryout_day?: string | null;
+  source?: string | null;
 };
 
 type AnalyticsSummary = {
@@ -159,6 +160,116 @@ export default function AnalyticsPanel({
         range={range}
       />
 
+      {/* SOURCE COMPARISON */}
+      <div className="bg-pss-panel border border-pss-border rounded-xl p-5">
+        <div className="mb-4">
+          <div className="text-sm font-semibold">Lead source comparison</div>
+          <div className="text-xs text-neutral-500">
+            Website vs Meta Lead Ads performance
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Website */}
+          <div className="bg-black/30 rounded-lg p-4 border border-blue-500/20">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-8 h-8 rounded-md bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-sm">
+                🌐
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-wider text-blue-300 font-semibold">
+                  Website
+                </div>
+                <div className="text-[10px] text-neutral-500">
+                  Direct signups
+                </div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-baseline justify-between">
+                <span className="text-2xl font-bold text-blue-300">
+                  {stats.websiteCount}
+                </span>
+                <span className="text-xs text-neutral-500">
+                  {pct(stats.websiteCount, stats.total)} of total
+                </span>
+              </div>
+              <div className="text-xs text-neutral-400">
+                <div className="flex justify-between py-1">
+                  <span>WhatsApp confirmed:</span>
+                  <span className="font-medium text-emerald-300">
+                    {stats.websiteConfirmed} ({stats.websiteConfirmRate}%)
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Meta Lead Ads */}
+          <div className="bg-black/30 rounded-lg p-4 border border-orange-500/20">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-8 h-8 rounded-md bg-orange-500/15 border border-orange-500/30 flex items-center justify-center text-sm">
+                📱
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-wider text-orange-300 font-semibold">
+                  Meta Lead Ad
+                </div>
+                <div className="text-[10px] text-neutral-500">
+                  FB/IG ads
+                </div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-baseline justify-between">
+                <span className="text-2xl font-bold text-orange-300">
+                  {stats.metaCount}
+                </span>
+                <span className="text-xs text-neutral-500">
+                  {pct(stats.metaCount, stats.total)} of total
+                </span>
+              </div>
+              <div className="text-xs text-neutral-400">
+                <div className="flex justify-between py-1">
+                  <span>WhatsApp confirmed:</span>
+                  <span className="font-medium text-emerald-300">
+                    {stats.metaConfirmed} ({stats.metaConfirmRate}%)
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Comparison metrics */}
+        {stats.websiteCount > 0 && stats.metaCount > 0 && (
+          <div className="mt-4 pt-4 border-t border-pss-border">
+            <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-medium mb-2">
+              Performance comparison
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="text-neutral-400">
+                <span>Better conversion rate:</span>
+                <span className="ml-2 font-medium text-white">
+                  {stats.websiteConfirmRate > stats.metaConfirmRate
+                    ? "🌐 Website"
+                    : stats.metaConfirmRate > stats.websiteConfirmRate
+                    ? "📱 Meta"
+                    : "Tied"}
+                </span>
+              </div>
+              <div className="text-neutral-400">
+                <span>More volume:</span>
+                <span className="ml-2 font-medium text-white">
+                  {stats.websiteCount > stats.metaCount
+                    ? "🌐 Website"
+                    : "📱 Meta"}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* CHART + QUICK STATS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* LEAD ACTIVITY CHART */}
@@ -247,6 +358,20 @@ function compute(leads: Lead[], range: "7d" | "30d") {
   const day2 = leads.filter((l) => l.tryout_day === "day2").length;
   const both = leads.filter((l) => (l.tryout_day || "both") === "both").length;
 
+  // Source tracking
+  const website = leads.filter((l) => (l.source || "website") === "website");
+  const meta = leads.filter((l) => l.source === "meta_lead_ad");
+
+  const websiteCount = website.length;
+  const metaCount = meta.length;
+
+  // WhatsApp confirmation rates by source
+  const websiteConfirmed = website.filter((l) => l.whatsapp_confirmed).length;
+  const metaConfirmed = meta.filter((l) => l.whatsapp_confirmed).length;
+
+  const websiteConfirmRate = websiteCount > 0 ? Math.round((websiteConfirmed / websiteCount) * 100) : 0;
+  const metaConfirmRate = metaCount > 0 ? Math.round((metaConfirmed / metaCount) * 100) : 0;
+
   const statusCount = (s: string) =>
     leads.filter((l) => l.status === s).length;
 
@@ -281,6 +406,12 @@ function compute(leads: Lead[], range: "7d" | "30d") {
     statusAttended: statusCount("attended"),
     statusRegistered: statusCount("registered"),
     dailySignups,
+    websiteCount,
+    metaCount,
+    websiteConfirmed,
+    metaConfirmed,
+    websiteConfirmRate,
+    metaConfirmRate,
   };
 }
 

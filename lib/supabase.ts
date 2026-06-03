@@ -69,6 +69,8 @@ export type Lead = {
   whatsapp_send_status?: "sent" | "failed" | "confirmed" | string | null;
   /** Last Meta error message if the send failed. */
   whatsapp_send_error?: string | null;
+  /** Lead source: "website", "meta_lead_ad", etc. */
+  source?: string | null;
   notes: string | null;
 };
 

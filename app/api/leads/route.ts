@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { sendWelcomeEmail, sendAdminNotification } from "@/lib/email";
-import { sendWhatsAppTemplate } from "@/lib/whatsapp";
+import { sendWhatsAppTemplate, WELCOME_TEMPLATE_NAME } from "@/lib/whatsapp";
 import { logActivity } from "@/lib/activity";
 import { isAdminPassword, unauthorized } from "@/lib/auth";
 
@@ -50,6 +50,8 @@ export async function POST(req: NextRequest) {
   // Day selection — "day1" | "day2" | "both". Default to "both".
   let tryout_day = str(body.tryout_day).toLowerCase();
   if (!["day1", "day2", "both"].includes(tryout_day)) tryout_day = "both";
+  // Source tracking — "website", "meta_lead_ad", etc. Default to "website".
+  const source = str(body.source) || "website";
 
   // validation
   const missing: string[] = [];
@@ -128,6 +130,7 @@ export async function POST(req: NextRequest) {
     status: "new",
     tryout_date: anchorDate,
     tryout_day,
+    source,
   };
   if (age_group) insertRow.age_group = age_group;
 
@@ -157,7 +160,7 @@ export async function POST(req: NextRequest) {
     sendWelcomeEmail(data),
     sendAdminNotification(data),
     data.whatsapp_opt_in
-      ? sendWhatsAppTemplate(data.parent_phone, "pss_welcome", [
+      ? sendWhatsAppTemplate(data.parent_phone, WELCOME_TEMPLATE_NAME, [
           data.parent_name,
           data.player_name,
         ])
