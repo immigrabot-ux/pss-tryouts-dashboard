@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
     )}/leads?access_token=${encodeURIComponent(accessToken)}`;
 
     while (nextUrl) {
-      const res = await fetch(nextUrl);
+      const res: Response = await fetch(nextUrl);
       const data = await res.json();
 
       if (!res.ok) {
