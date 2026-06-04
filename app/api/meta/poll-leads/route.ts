@@ -26,7 +26,8 @@ export const maxDuration = 60; // Allow up to 60 seconds for polling large batch
  */
 export async function GET(req: NextRequest) {
   const accessToken = process.env.META_ACCESS_TOKEN;
-  const formId = process.env.META_FORM_ID;
+  const pageId = process.env.META_PAGE_ID;
+  const formIdEnv = process.env.META_FORM_ID;
 
   if (!accessToken) {
     return NextResponse.json(
@@ -35,9 +36,13 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  if (!formId) {
+  if (!pageId && !formIdEnv) {
     return NextResponse.json(
-      { ok: false, error: "META_FORM_ID not configured" },
+      {
+        ok: false,
+        error:
+          "Configure META_PAGE_ID (recommended — polls all forms on the page) or META_FORM_ID (single form).",
+      },
       { status: 500 }
     );
   }
@@ -46,42 +51,122 @@ export async function GET(req: NextRequest) {
   let newLeads = 0;
   let skipped = 0;
   const errors: string[] = [];
+  const formsPolled: { id: string; name: string; leadCount: number }[] = [];
 
   try {
-    // Fetch all leads from Meta (handle pagination)
-    const allLeads: any[] = [];
-    let nextUrl: string | null = `https://graph.facebook.com/v18.0/${encodeURIComponent(
-      formId
-    )}/leads?access_token=${encodeURIComponent(accessToken)}`;
+    // Step A — figure out which forms to poll.
+    //
+    // Preference order:
+    //   1. META_PAGE_ID is set → list all forms on that page.
+    //   2. META_FORM_ID is set → ask Meta which page owns that form,
+    //      then list all forms on that page (auto-discovery, no env change needed).
+    //   3. Fall back to just the single META_FORM_ID if discovery fails.
+    const formsToPoll: { id: string; name: string }[] = [];
+    let effectivePageId: string | null = pageId || null;
 
-    while (nextUrl) {
-      const res: Response = await fetch(nextUrl);
-      const data = await res.json();
-
-      if (!res.ok) {
-        console.error("[meta-poll] Graph API error:", data.error);
-        errors.push(
-          `Graph API error: ${data.error?.message || res.statusText}`
-        );
-        break;
-      }
-
-      const leads = data.data || [];
-      allLeads.push(...leads);
-
-      // Check for pagination
-      nextUrl = data.paging?.next || null;
-
-      // Safety limit — if we have 1000+ leads in one poll, stop
-      if (allLeads.length >= 1000) {
-        console.warn(
-          "[meta-poll] Hit 1000 lead limit in single poll, stopping pagination"
-        );
-        break;
+    // Auto-derive the page ID from the configured form if not provided.
+    if (!effectivePageId && formIdEnv) {
+      try {
+        const formMetaUrl = `https://graph.facebook.com/v18.0/${encodeURIComponent(
+          formIdEnv
+        )}?fields=page&access_token=${encodeURIComponent(accessToken)}`;
+        const res = await fetch(formMetaUrl);
+        const data = await res.json();
+        if (res.ok && data?.page?.id) {
+          effectivePageId = data.page.id;
+          console.log(
+            `[meta-poll] Auto-derived page ID ${effectivePageId} from form ${formIdEnv}`
+          );
+        } else {
+          console.warn(
+            "[meta-poll] Could not derive page from form:",
+            data?.error?.message || res.statusText
+          );
+        }
+      } catch (err) {
+        console.warn("[meta-poll] Form→page lookup failed:", err);
       }
     }
 
-    console.log(`[meta-poll] Fetched ${allLeads.length} leads from Meta`);
+    if (effectivePageId) {
+      let nextFormsUrl: string | null = `https://graph.facebook.com/v18.0/${encodeURIComponent(
+        effectivePageId
+      )}/leadgen_forms?fields=id,name,status&access_token=${encodeURIComponent(
+        accessToken
+      )}`;
+      while (nextFormsUrl) {
+        const res: Response = await fetch(nextFormsUrl);
+        const data = await res.json();
+        if (!res.ok) {
+          errors.push(
+            `Page forms fetch failed: ${data.error?.message || res.statusText}`
+          );
+          break;
+        }
+        for (const f of data.data || []) {
+          if (!f.status || f.status === "ACTIVE") {
+            formsToPoll.push({ id: f.id, name: f.name || "(unnamed)" });
+          }
+        }
+        nextFormsUrl = data.paging?.next || null;
+      }
+    }
+
+    // Last-resort fallback: if page discovery failed and we have a single
+    // form configured, at least poll that one.
+    if (formsToPoll.length === 0 && formIdEnv) {
+      formsToPoll.push({ id: formIdEnv, name: "(env-configured fallback)" });
+    }
+
+    console.log(
+      `[meta-poll] Discovered ${formsToPoll.length} form(s) to poll (page=${effectivePageId || "n/a"})`
+    );
+
+    // Step B — fetch leads from each form (paginated, capped per form).
+    const allLeads: any[] = [];
+    for (const form of formsToPoll) {
+      let formLeadCount = 0;
+      let nextUrl: string | null = `https://graph.facebook.com/v18.0/${encodeURIComponent(
+        form.id
+      )}/leads?access_token=${encodeURIComponent(accessToken)}`;
+      while (nextUrl) {
+        const res: Response = await fetch(nextUrl);
+        const data = await res.json();
+        if (!res.ok) {
+          errors.push(
+            `Form ${form.id} (${form.name}) fetch failed: ${
+              data.error?.message || res.statusText
+            }`
+          );
+          break;
+        }
+        const leads = (data.data || []).map((l: any) => ({
+          ...l,
+          _formId: form.id,
+          _formName: form.name,
+        }));
+        allLeads.push(...leads);
+        formLeadCount += leads.length;
+        nextUrl = data.paging?.next || null;
+
+        // Per-form safety cap so one big form doesn't starve the cron budget.
+        if (formLeadCount >= 200) {
+          console.warn(
+            `[meta-poll] form ${form.id} hit 200-lead per-poll cap`
+          );
+          break;
+        }
+      }
+      formsPolled.push({
+        id: form.id,
+        name: form.name,
+        leadCount: formLeadCount,
+      });
+    }
+
+    console.log(
+      `[meta-poll] Fetched ${allLeads.length} leads across ${formsToPoll.length} form(s)`
+    );
 
     // Process each lead
     for (const metaLead of allLeads) {
@@ -159,26 +244,35 @@ export async function GET(req: NextRequest) {
 
       console.log(`[meta-poll] Lead ${leadgenId} age mapping: raw="${player_age_raw}" → player_age=${player_age}, age_group="${age_group}"`);
 
+      // Pull form metadata that we attached in step B.
+      const formId = metaLead._formId || "(unknown)";
+      const formName = metaLead._formName || "";
+
       // Build insert row
       const insertRow: Record<string, unknown> = {
         parent_name: parent_name || "(unknown)",
         player_name: player_name || "(unknown)",
-        player_age: player_age || 0, // Numeric age for sorting/filtering
+        player_age: player_age || 0,
         parent_phone: parent_phone || "",
         parent_email: parent_email || "",
-        whatsapp_opt_in: true, // Lead Ads opt-in is implicit
+        whatsapp_opt_in: true,
         whatsapp_confirmed: false,
         status: "new",
-        tryout_date: "2026-07-25", // anchor to Day 1
-        tryout_day: "both", // default
+        tryout_date: "2026-07-25",
+        tryout_day: "both",
         source: "meta_lead_ad",
         meta_leadgen_id: leadgenId,
-        notes: `Source: Meta Lead Ad (polling) · leadgen_id=${leadgenId} · form_id=${formId} · created_time=${metaLead.created_time || ""}`,
+        notes: `Source: Meta Lead Ad${
+          formName ? ` "${formName}"` : ""
+        } (polling) · leadgen_id=${leadgenId} · form_id=${formId} · created_time=${
+          metaLead.created_time || ""
+        }`,
       };
-      // Store the raw age range text (e.g. "6-8 years old") in age_group
       if (age_group) insertRow.age_group = age_group;
 
-      // Insert lead
+      // Insert lead — gracefully handle the case where another invocation
+      // (or the webhook) inserted this same leadgen_id between our
+      // dedupe-check and now.
       const { data: lead, error: insertError } = await supabase
         .from("leads")
         .insert(insertRow)
@@ -186,22 +280,27 @@ export async function GET(req: NextRequest) {
         .single();
 
       if (insertError || !lead) {
+        const msg = insertError?.message || "";
+        if (/duplicate key/i.test(msg) || /unique constraint/i.test(msg)) {
+          // Race condition — another path inserted it. Treat as skipped.
+          skipped++;
+          continue;
+        }
         console.error(
           `[meta-poll] Failed to insert lead ${leadgenId}:`,
-          insertError?.message
+          msg
         );
-        errors.push(
-          `Insert failed for ${leadgenId}: ${insertError?.message || "unknown"}`
-        );
+        errors.push(`Insert failed for ${leadgenId}: ${msg || "unknown"}`);
         continue;
       }
 
       console.log(`[meta-poll] Inserted new lead ${lead.id} from ${leadgenId}`);
       newLeads++;
 
-      // Fire welcome flow (email + admin notif + WhatsApp)
-      // Run in parallel but don't block the poll response
-      Promise.all([
+      // IMPORTANT — must AWAIT all side effects. Vercel kills serverless
+      // functions the moment the response is sent, so fire-and-forget
+      // (.then without await) silently drops everything.
+      const [emailResult, adminResult, waResult] = await Promise.all([
         sendWelcomeEmail(lead),
         sendAdminNotification(lead),
         lead.whatsapp_opt_in
@@ -209,59 +308,63 @@ export async function GET(req: NextRequest) {
               lead.parent_name,
               lead.player_name,
             ])
-          : Promise.resolve({ ok: true }),
-      ]).then(async ([emailResult, adminResult, waResult]) => {
-        // Log activities
-        await Promise.all([
-          logActivity(
-            lead.id,
-            "system",
-            "meta_lead_ad_poll",
-            `leadgen_id=${leadgenId} form_id=${formId}`,
-            true
-          ),
-          logActivity(
-            lead.id,
-            "email",
-            "welcome",
-            emailResult.ok ? null : emailResult.error || "unknown error",
-            emailResult.ok
-          ),
-          logActivity(
-            lead.id,
-            "email",
-            "admin_notification",
-            adminResult.ok ? null : adminResult.error || "unknown error",
-            adminResult.ok
-          ),
-          lead.whatsapp_opt_in
-            ? logActivity(
-                lead.id,
-                "whatsapp",
-                "welcome",
-                waResult.ok ? null : (waResult as any).error || "unknown error",
-                waResult.ok
-              )
-            : Promise.resolve(),
-        ]);
+          : Promise.resolve({ ok: true } as { ok: boolean; error?: string }),
+      ]);
 
-        // Persist WhatsApp send status
-        if (lead.whatsapp_opt_in) {
-          await supabase
-            .from("leads")
-            .update({
-              whatsapp_send_status: waResult.ok ? "sent" : "failed",
-              whatsapp_send_error: waResult.ok
-                ? null
-                : (waResult as any).error || "unknown error",
-            })
-            .eq("id", lead.id);
-        }
-      });
+      await Promise.all([
+        logActivity(
+          lead.id,
+          "system",
+          "meta_lead_ad_poll",
+          `leadgen_id=${leadgenId} form_id=${formId}`,
+          true
+        ),
+        logActivity(
+          lead.id,
+          "email",
+          "welcome",
+          emailResult.ok ? null : emailResult.error || "unknown error",
+          emailResult.ok
+        ),
+        logActivity(
+          lead.id,
+          "email",
+          "admin_notification",
+          adminResult.ok ? null : adminResult.error || "unknown error",
+          adminResult.ok
+        ),
+        lead.whatsapp_opt_in
+          ? logActivity(
+              lead.id,
+              "whatsapp",
+              "welcome",
+              waResult.ok ? null : (waResult as any).error || "unknown error",
+              waResult.ok
+            )
+          : Promise.resolve(),
+      ]);
+
+      // Persist WhatsApp send status for the dashboard badge
+      if (lead.whatsapp_opt_in) {
+        await supabase
+          .from("leads")
+          .update({
+            whatsapp_send_status: waResult.ok ? "sent" : "failed",
+            whatsapp_send_error: waResult.ok
+              ? null
+              : (waResult as any).error || "unknown error",
+          })
+          .eq("id", lead.id);
+      }
+
+      console.log(
+        `[meta-poll] lead ${lead.id} processed — email:${emailResult.ok} admin:${adminResult.ok} wa:${waResult.ok}`
+      );
     }
 
     return NextResponse.json({
       ok: true,
+      formsPolled,
       newLeads,
       skipped,
       total: allLeads.length,

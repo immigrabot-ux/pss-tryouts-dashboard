@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/meta/poll-leads",
-      "schedule": "*/5 * * * *"
+      "schedule": "* * * * *"
     }
   ]
 }
