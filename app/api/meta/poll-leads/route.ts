@@ -106,36 +106,43 @@ export async function GET(req: NextRequest) {
       // Parse field_data array from Meta
       const fieldData: Array<{ name: string; values: string[] }> =
         metaLead.field_data || [];
+
+      // DEBUG: Log raw field data to see exact field names from Meta
+      console.log(`[meta-poll] Lead ${leadgenId} field_data:`, JSON.stringify(fieldData));
+
       const fields = new Map<string, string>();
       for (const f of fieldData) {
         if (!f?.name || !Array.isArray(f.values)) continue;
         const value = (f.values[0] || "").toString().trim();
-        fields.set(f.name.toLowerCase(), value);
+        // Normalize field name: lowercase, strip apostrophes and underscores
+        const normalizedName = f.name.toLowerCase().replace(/['_]/g, "");
+        fields.set(normalizedName, value);
       }
 
       // Map Meta fields to our lead schema
       const parent_name = pick(fields, [
-        "full_name",
+        "fullname",
         "name",
-        "first_name_last_name",
+        "firstnamelastname",
       ]);
-      const parent_email = pick(fields, ["email", "email_address"]);
+      const parent_email = pick(fields, ["email", "emailaddress"]);
       const parent_phone = pick(fields, [
-        "whatsapp_number",
-        "phone_number",
+        "whatsappnumber",
+        "phonenumber",
         "phone",
       ]);
       const player_name = pick(fields, [
-        "child_s_full_name",
-        "child_full_name",
-        "player_name",
-        "child_name",
+        "childsfullname",
+        "childfullname",
+        "playername",
+        "childname",
       ]);
       const player_age_raw = pick(fields, [
-        "child_s_age",
-        "child_age",
-        "player_age",
-        "age_group",
+        "childsage",
+        "childage",
+        "childsage",
+        "playerage",
+        "agegroup",
         "age",
       ]);
 
@@ -147,14 +154,16 @@ export async function GET(req: NextRequest) {
         continue;
       }
 
-      // Parse age
+      // Parse age - extract numeric value for player_age, keep raw text for age_group
       const { player_age, age_group } = parseAge(player_age_raw);
+
+      console.log(`[meta-poll] Lead ${leadgenId} age mapping: raw="${player_age_raw}" → player_age=${player_age}, age_group="${age_group}"`);
 
       // Build insert row
       const insertRow: Record<string, unknown> = {
         parent_name: parent_name || "(unknown)",
         player_name: player_name || "(unknown)",
-        player_age,
+        player_age: player_age || 0, // Numeric age for sorting/filtering
         parent_phone: parent_phone || "",
         parent_email: parent_email || "",
         whatsapp_opt_in: true, // Lead Ads opt-in is implicit
@@ -166,6 +175,7 @@ export async function GET(req: NextRequest) {
         meta_leadgen_id: leadgenId,
         notes: `Source: Meta Lead Ad (polling) · leadgen_id=${leadgenId} · form_id=${formId} · created_time=${metaLead.created_time || ""}`,
       };
+      // Store the raw age range text (e.g. "6-8 years old") in age_group
       if (age_group) insertRow.age_group = age_group;
 
       // Insert lead
