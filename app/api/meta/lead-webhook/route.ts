@@ -183,6 +183,22 @@ async function processOneLead({
   // Step 4 — derive numeric age from the age group label if present
   const { player_age, age_group } = parseAge(player_age_raw);
 
+  const supabase = getSupabaseAdmin();
+
+  // Check if we've already processed this leadgen_id (dedupe against polling)
+  const { data: existing } = await supabase
+    .from("leads")
+    .select("id")
+    .eq("meta_leadgen_id", leadgenId)
+    .maybeSingle();
+
+  if (existing) {
+    console.log(
+      `[meta-leads] lead ${leadgenId} already exists (id=${existing.id}) — skipping`
+    );
+    return; // Already processed via polling or previous webhook
+  }
+
   const insertRow: Record<string, unknown> = {
     parent_name: parent_name || "(unknown)",
     player_name: player_name || "(unknown)",
@@ -197,20 +213,21 @@ async function processOneLead({
   };
   if (age_group) insertRow.age_group = age_group;
 
-  // Attempt to include source — if column doesn't exist yet, retry without.
+  // Attempt to include source + meta_leadgen_id — if column doesn't exist yet, retry without.
   insertRow.source = "meta_lead_ad";
+  insertRow.meta_leadgen_id = leadgenId;
   insertRow.notes = buildNotes({ leadgenId, formId, pageId, adId, createdTime });
 
-  const supabase = getSupabaseAdmin();
   let { data, error } = await supabase
     .from("leads")
     .insert(insertRow)
     .select()
     .single();
 
-  if (error && /source/i.test(error.message)) {
-    // Schema doesn't have a `source` column yet — retry without it.
+  if (error && (/source/i.test(error.message) || /meta_leadgen_id/i.test(error.message))) {
+    // Schema doesn't have source or meta_leadgen_id columns yet — retry without them.
     delete insertRow.source;
+    delete insertRow.meta_leadgen_id;
     const retry = await supabase.from("leads").insert(insertRow).select().single();
     data = retry.data;
     error = retry.error;

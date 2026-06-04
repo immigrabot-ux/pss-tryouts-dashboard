@@ -71,6 +71,8 @@ export type Lead = {
   whatsapp_send_error?: string | null;
   /** Lead source: "website", "meta_lead_ad", etc. */
   source?: string | null;
+  /** Meta Lead Ads leadgen_id for deduplication during polling */
+  meta_leadgen_id?: string | null;
   notes: string | null;
 };
 
