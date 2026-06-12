@@ -3,6 +3,10 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { sendWelcomeEmail, sendAdminNotification } from "@/lib/email";
 import { sendWhatsAppTemplate, WELCOME_TEMPLATE_NAME } from "@/lib/whatsapp";
 import { logActivity } from "@/lib/activity";
+import {
+  claimWelcomeEmail,
+  claimWelcomeWhatsApp,
+} from "@/lib/idempotency";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +31,18 @@ export const maxDuration = 60; // Allow up to 60 seconds for polling large batch
 export async function GET(req: NextRequest) {
   const accessToken = process.env.META_ACCESS_TOKEN;
   const pageId = process.env.META_PAGE_ID;
-  const formIdEnv = process.env.META_FORM_ID;
+  // Accept EITHER:
+  //   - META_FORM_ID (single id)         e.g. "1030153356473226"
+  //   - META_FORM_IDS (comma-separated)  e.g. "1030153356473226,9876543210"
+  const formIdEnvSingle = process.env.META_FORM_ID || "";
+  const formIdEnvList = process.env.META_FORM_IDS || "";
+  const envFormIds = Array.from(
+    new Set(
+      [...formIdEnvSingle.split(","), ...formIdEnvList.split(",")]
+        .map((s) => s.trim())
+        .filter(Boolean)
+    )
+  );
 
   if (!accessToken) {
     return NextResponse.json(
@@ -36,12 +51,12 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  if (!pageId && !formIdEnv) {
+  if (!pageId && envFormIds.length === 0) {
     return NextResponse.json(
       {
         ok: false,
         error:
-          "Configure META_PAGE_ID (recommended — polls all forms on the page) or META_FORM_ID (single form).",
+          "Configure META_PAGE_ID (auto-polls all forms on the page) or META_FORM_IDS (comma-separated list).",
       },
       { status: 500 }
     );
@@ -64,18 +79,18 @@ export async function GET(req: NextRequest) {
     const formsToPoll: { id: string; name: string }[] = [];
     let effectivePageId: string | null = pageId || null;
 
-    // Auto-derive the page ID from the configured form if not provided.
-    if (!effectivePageId && formIdEnv) {
+    // Auto-derive the page ID from the first configured form if not provided.
+    if (!effectivePageId && envFormIds.length > 0) {
       try {
         const formMetaUrl = `https://graph.facebook.com/v18.0/${encodeURIComponent(
-          formIdEnv
+          envFormIds[0]
         )}?fields=page&access_token=${encodeURIComponent(accessToken)}`;
         const res = await fetch(formMetaUrl);
         const data = await res.json();
         if (res.ok && data?.page?.id) {
           effectivePageId = data.page.id;
           console.log(
-            `[meta-poll] Auto-derived page ID ${effectivePageId} from form ${formIdEnv}`
+            `[meta-poll] Auto-derived page ID ${effectivePageId} from form ${envFormIds[0]}`
           );
         } else {
           console.warn(
@@ -112,10 +127,14 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Last-resort fallback: if page discovery failed and we have a single
-    // form configured, at least poll that one.
-    if (formsToPoll.length === 0 && formIdEnv) {
-      formsToPoll.push({ id: formIdEnv, name: "(env-configured fallback)" });
+    // Last-resort fallback: if page discovery failed (or returned an incomplete
+    // list — common when the access token isn't a Page token), make sure every
+    // env-configured form ID still gets polled.
+    const alreadyPolling = new Set(formsToPoll.map((f) => f.id));
+    for (const fid of envFormIds) {
+      if (!alreadyPolling.has(fid)) {
+        formsToPoll.push({ id: fid, name: "(env-configured)" });
+      }
     }
 
     console.log(
@@ -297,18 +316,37 @@ export async function GET(req: NextRequest) {
       console.log(`[meta-poll] Inserted new lead ${lead.id} from ${leadgenId}`);
       newLeads++;
 
-      // IMPORTANT — must AWAIT all side effects. Vercel kills serverless
-      // functions the moment the response is sent, so fire-and-forget
-      // (.then without await) silently drops everything.
-      const [emailResult, adminResult, waResult] = await Promise.all([
-        sendWelcomeEmail(lead),
-        sendAdminNotification(lead),
+      // IDEMPOTENCY — claim the welcome-email and welcome-whatsapp slots
+      // atomically before sending. If either is already claimed (another
+      // poll run, the webhook, or a manual send) we skip and log.
+      const [emailClaimed, waClaimed] = await Promise.all([
+        claimWelcomeEmail(lead.id),
         lead.whatsapp_opt_in
+          ? claimWelcomeWhatsApp(lead.id)
+          : Promise.resolve(false),
+      ]);
+
+      // Vercel kills serverless functions the moment the response is sent,
+      // so we must AWAIT all side effects here (no fire-and-forget).
+      const [emailResult, adminResult, waResult] = await Promise.all([
+        emailClaimed
+          ? sendWelcomeEmail(lead)
+          : Promise.resolve({ ok: true, skipped: true } as {
+              ok: boolean;
+              error?: string;
+              skipped?: boolean;
+            }),
+        sendAdminNotification(lead),
+        waClaimed
           ? sendWhatsAppTemplate(lead.parent_phone, WELCOME_TEMPLATE_NAME, [
               lead.parent_name,
               lead.player_name,
             ])
-          : Promise.resolve({ ok: true } as { ok: boolean; error?: string }),
+          : Promise.resolve({ ok: true, skipped: true } as {
+              ok: boolean;
+              error?: string;
+              skipped?: boolean;
+            }),
       ]);
 
       await Promise.all([
@@ -322,8 +360,12 @@ export async function GET(req: NextRequest) {
         logActivity(
           lead.id,
           "email",
-          "welcome",
-          emailResult.ok ? null : emailResult.error || "unknown error",
+          emailClaimed ? "welcome" : "welcome_skipped_already_sent",
+          emailClaimed
+            ? emailResult.ok
+              ? null
+              : emailResult.error || "unknown error"
+            : null,
           emailResult.ok
         ),
         logActivity(
@@ -337,15 +379,20 @@ export async function GET(req: NextRequest) {
           ? logActivity(
               lead.id,
               "whatsapp",
-              "welcome",
-              waResult.ok ? null : (waResult as any).error || "unknown error",
+              waClaimed ? "welcome" : "welcome_skipped_already_sent",
+              waClaimed
+                ? waResult.ok
+                  ? null
+                  : (waResult as any).error || "unknown error"
+                : null,
               waResult.ok
             )
           : Promise.resolve(),
       ]);
 
-      // Persist WhatsApp send status for the dashboard badge
-      if (lead.whatsapp_opt_in) {
+      // Persist WhatsApp send status only when WE actually sent it. If we
+      // skipped (already sent earlier), leave the existing status alone.
+      if (waClaimed && lead.whatsapp_opt_in) {
         await supabase
           .from("leads")
           .update({
@@ -358,7 +405,7 @@ export async function GET(req: NextRequest) {
       }
 
       console.log(
-        `[meta-poll] lead ${lead.id} processed — email:${emailResult.ok} admin:${adminResult.ok} wa:${waResult.ok}`
+        `[meta-poll] lead ${lead.id} processed — emailSent:${emailClaimed} waSent:${waClaimed} admin:${adminResult.ok}`
       );
     }
 

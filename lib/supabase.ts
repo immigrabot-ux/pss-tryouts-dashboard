@@ -73,6 +73,16 @@ export type Lead = {
   source?: string | null;
   /** Meta Lead Ads leadgen_id for deduplication during polling */
   meta_leadgen_id?: string | null;
+  /**
+   * Idempotency guard for welcome email. Present = already sent, NEVER resend.
+   * Set via the atomic helper claimWelcomeEmail() in lib/idempotency.ts.
+   */
+  welcome_email_sent_at?: string | null;
+  /**
+   * Idempotency guard for welcome WhatsApp. Present = already sent, NEVER resend.
+   * Set via the atomic helper claimWelcomeWhatsApp() in lib/idempotency.ts.
+   */
+  welcome_whatsapp_sent_at?: string | null;
   notes: string | null;
 };
 

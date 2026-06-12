@@ -46,7 +46,15 @@ export async function POST(
   }
 
   if (action === "welcome_email") {
+    // Manual send always fires (admin override) but we mark the idempotency
+    // timestamp so the cron won't ALSO send later.
     const r = await sendWelcomeEmail(lead);
+    if (r.ok) {
+      await supabase
+        .from("leads")
+        .update({ welcome_email_sent_at: new Date().toISOString() })
+        .eq("id", lead.id);
+    }
     await logActivity(lead.id, "email", "welcome_manual", r.error || null, r.ok);
     return NextResponse.json(r);
   }
@@ -57,6 +65,16 @@ export async function POST(
       WELCOME_TEMPLATE_NAME,
       [lead.parent_name, lead.player_name]
     );
+    if (r.ok) {
+      await supabase
+        .from("leads")
+        .update({
+          welcome_whatsapp_sent_at: new Date().toISOString(),
+          whatsapp_send_status: "sent",
+          whatsapp_send_error: null,
+        })
+        .eq("id", lead.id);
+    }
     await logActivity(
       lead.id,
       "whatsapp",

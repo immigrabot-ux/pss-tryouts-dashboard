@@ -4,6 +4,10 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { sendWelcomeEmail, sendAdminNotification } from "@/lib/email";
 import { sendWhatsAppTemplate, WELCOME_TEMPLATE_NAME } from "@/lib/whatsapp";
 import { logActivity } from "@/lib/activity";
+import {
+  claimWelcomeEmail,
+  claimWelcomeWhatsApp,
+} from "@/lib/idempotency";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -258,16 +262,34 @@ async function processOneLead({
     `[meta-leads] inserted lead ${data.id} from Meta leadgen_id=${leadgenId}`
   );
 
-  // Step 5 — fire welcome flow (email + admin notif + WhatsApp template).
-  const [emailResult, adminResult, waResult] = await Promise.all([
-    sendWelcomeEmail(data),
-    sendAdminNotification(data),
+  // Step 5 — IDEMPOTENT welcome flow. We could race with the cron poll
+  // for the same lead, so claim the slots atomically before sending.
+  const [emailClaimed, waClaimed] = await Promise.all([
+    claimWelcomeEmail(data.id),
     data.whatsapp_opt_in
+      ? claimWelcomeWhatsApp(data.id)
+      : Promise.resolve(false),
+  ]);
+
+  const [emailResult, adminResult, waResult] = await Promise.all([
+    emailClaimed
+      ? sendWelcomeEmail(data)
+      : Promise.resolve({ ok: true, skipped: true } as {
+          ok: boolean;
+          error?: string;
+          skipped?: boolean;
+        }),
+    sendAdminNotification(data),
+    waClaimed
       ? sendWhatsAppTemplate(data.parent_phone, WELCOME_TEMPLATE_NAME, [
           data.parent_name,
           data.player_name,
         ])
-      : Promise.resolve({ ok: true } as { ok: boolean; error?: string }),
+      : Promise.resolve({ ok: true, skipped: true } as {
+          ok: boolean;
+          error?: string;
+          skipped?: boolean;
+        }),
   ]);
 
   await Promise.all([
@@ -281,8 +303,12 @@ async function processOneLead({
     logActivity(
       data.id,
       "email",
-      "welcome",
-      emailResult.ok ? null : emailResult.error || "unknown error",
+      emailClaimed ? "welcome" : "welcome_skipped_already_sent",
+      emailClaimed
+        ? emailResult.ok
+          ? null
+          : emailResult.error || "unknown error"
+        : null,
       emailResult.ok
     ),
     logActivity(
@@ -296,15 +322,19 @@ async function processOneLead({
       ? logActivity(
           data.id,
           "whatsapp",
-          "welcome",
-          waResult.ok ? null : (waResult as any).error || "unknown error",
+          waClaimed ? "welcome" : "welcome_skipped_already_sent",
+          waClaimed
+            ? waResult.ok
+              ? null
+              : (waResult as any).error || "unknown error"
+            : null,
           waResult.ok
         )
       : Promise.resolve(),
   ]);
 
-  // Persist the WhatsApp send outcome onto the lead for the dashboard badge.
-  if (data.whatsapp_opt_in) {
+  // Only overwrite the dashboard WhatsApp status when we actually fired.
+  if (waClaimed && data.whatsapp_opt_in) {
     await supabase
       .from("leads")
       .update({

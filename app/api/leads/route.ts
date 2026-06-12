@@ -4,6 +4,10 @@ import { sendWelcomeEmail, sendAdminNotification } from "@/lib/email";
 import { sendWhatsAppTemplate, WELCOME_TEMPLATE_NAME } from "@/lib/whatsapp";
 import { logActivity } from "@/lib/activity";
 import { isAdminPassword, unauthorized } from "@/lib/auth";
+import {
+  claimWelcomeEmail,
+  claimWelcomeWhatsApp,
+} from "@/lib/idempotency";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -153,30 +157,50 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // IMPORTANT: Vercel kills serverless functions the moment the response is sent,
-  // so any `Promise.resolve().then(...)` background work would be silently dropped.
-  // We AWAIT everything here. Form submission takes ~3–5 seconds — acceptable
-  // tradeoff for reliable email + WhatsApp delivery.
-  //
-  // Run the three side-effects in parallel for speed.
-  const [emailResult, adminResult, waResult] = await Promise.all([
-    sendWelcomeEmail(data),
-    sendAdminNotification(data),
+  // IDEMPOTENCY — claim the welcome-email and welcome-whatsapp slots
+  // atomically before sending. New leads will of course be unclaimed, but
+  // if a duplicate POST (or a parallel webhook) hits this for the same
+  // lead, the claim will fail and we skip the send.
+  const [emailClaimed, waClaimed] = await Promise.all([
+    claimWelcomeEmail(data.id),
     data.whatsapp_opt_in
+      ? claimWelcomeWhatsApp(data.id)
+      : Promise.resolve(false),
+  ]);
+
+  // Vercel kills serverless functions the moment the response is sent,
+  // so we AWAIT everything before returning.
+  const [emailResult, adminResult, waResult] = await Promise.all([
+    emailClaimed
+      ? sendWelcomeEmail(data)
+      : Promise.resolve({ ok: true, skipped: true } as {
+          ok: boolean;
+          error?: string;
+          skipped?: boolean;
+        }),
+    sendAdminNotification(data),
+    waClaimed
       ? sendWhatsAppTemplate(data.parent_phone, WELCOME_TEMPLATE_NAME, [
           data.parent_name,
           data.player_name,
         ])
-      : Promise.resolve({ ok: true } as { ok: boolean; error?: string }),
+      : Promise.resolve({ ok: true, skipped: true } as {
+          ok: boolean;
+          error?: string;
+          skipped?: boolean;
+        }),
   ]);
 
-  // Log each result (also awaited — but soft-fails so it won't throw).
   await Promise.all([
     logActivity(
       data.id,
       "email",
-      "welcome",
-      emailResult.ok ? null : emailResult.error || "unknown error",
+      emailClaimed ? "welcome" : "welcome_skipped_already_sent",
+      emailClaimed
+        ? emailResult.ok
+          ? null
+          : emailResult.error || "unknown error"
+        : null,
       emailResult.ok
     ),
     logActivity(
@@ -190,16 +214,20 @@ export async function POST(req: NextRequest) {
       ? logActivity(
           data.id,
           "whatsapp",
-          "welcome",
-          waResult.ok ? null : (waResult as any).error || "unknown error",
+          waClaimed ? "welcome" : "welcome_skipped_already_sent",
+          waClaimed
+            ? waResult.ok
+              ? null
+              : (waResult as any).error || "unknown error"
+            : null,
           waResult.ok
         )
       : Promise.resolve(),
   ]);
 
-  // Persist the WhatsApp send outcome on the lead itself so the dashboard
-  // can show a clear delivery-status badge per row.
-  if (data.whatsapp_opt_in) {
+  // Persist the WhatsApp send outcome on the lead itself, but ONLY if we
+  // actually fired this send (don't overwrite a previous send's status).
+  if (waClaimed && data.whatsapp_opt_in) {
     const status = waResult.ok ? "sent" : "failed";
     const error = waResult.ok ? null : (waResult as any).error || "unknown error";
     await supabase
@@ -212,7 +240,7 @@ export async function POST(req: NextRequest) {
   }
 
   console.log(
-    `[/api/leads] lead ${data.id} created — email:${emailResult.ok} admin:${adminResult.ok} wa:${waResult.ok}`
+    `[/api/leads] lead ${data.id} created — emailSent:${emailClaimed} waSent:${waClaimed} admin:${adminResult.ok}`
   );
 
   return withCORS(
