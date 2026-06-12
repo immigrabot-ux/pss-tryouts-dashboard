@@ -83,6 +83,14 @@ export type Lead = {
    * Set via the atomic helper claimWelcomeWhatsApp() in lib/idempotency.ts.
    */
   welcome_whatsapp_sent_at?: string | null;
+  /**
+   * Soft-delete flag. Hidden leads stay in the DB (so the cron's
+   * meta_leadgen_id dedup still recognizes them and DOESN'T re-process),
+   * but they're filtered out of the admin dashboard by default.
+   */
+  hidden?: boolean | null;
+  /** Why the lead was hidden — e.g. "test_lead", "duplicate", "invalid_phone". */
+  hidden_reason?: string | null;
   notes: string | null;
 };
 

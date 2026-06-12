@@ -74,6 +74,8 @@ export async function PATCH(
     "player_age",
     "parent_phone",
     "parent_email",
+    "hidden",
+    "hidden_reason",
   ];
   const update: Record<string, unknown> = {};
   for (const key of allowed) {

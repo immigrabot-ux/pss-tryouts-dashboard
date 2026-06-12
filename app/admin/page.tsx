@@ -22,8 +22,19 @@ type Lead = {
   whatsapp_send_status?: string | null;
   whatsapp_send_error?: string | null;
   source?: string | null;
+  hidden?: boolean | null;
+  hidden_reason?: string | null;
   notes: string | null;
 };
+
+const HIDE_REASONS = [
+  "test_lead",
+  "duplicate",
+  "invalid_phone",
+  "fake",
+  "not_a_real_signup",
+  "other",
+];
 
 const DAY_BADGE: Record<string, { label: string; cls: string }> = {
   day1: { label: "Day 1", cls: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
@@ -175,6 +186,7 @@ function Dashboard({
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
+  const [showHidden, setShowHidden] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   async function loadLeads() {
@@ -200,9 +212,15 @@ function Dashboard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Visible leads = non-hidden by default; "Show hidden" reveals everything.
+  const visibleLeads = useMemo(
+    () => (showHidden ? leads : leads.filter((l) => !l.hidden)),
+    [leads, showHidden]
+  );
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return leads.filter((l) => {
+    return visibleLeads.filter((l) => {
       if (statusFilter !== "all" && l.status !== statusFilter) return false;
       if (sourceFilter !== "all" && (l.source || "website") !== sourceFilter) return false;
       if (!q) return true;
@@ -213,7 +231,12 @@ function Dashboard({
         l.parent_email.toLowerCase().includes(q)
       );
     });
-  }, [leads, statusFilter, sourceFilter, search]);
+  }, [visibleLeads, statusFilter, sourceFilter, search]);
+
+  const hiddenCount = useMemo(
+    () => leads.filter((l) => l.hidden).length,
+    [leads]
+  );
 
   async function patchLead(id: string, patch: Partial<Lead>) {
     setLeads((prev) =>
@@ -234,15 +257,35 @@ function Dashboard({
     }
   }
 
-  async function deleteLead(id: string) {
-    if (!confirm("Delete this lead? This cannot be undone.")) return;
-    const res = await fetch(`/api/leads/${id}`, {
-      method: "DELETE",
-      headers: { "x-admin-password": password },
-    });
-    if (res.ok) {
-      setLeads((prev) => prev.filter((l) => l.id !== id));
-    }
+  /**
+   * Soft-delete a lead by setting `hidden = true`.
+   * Keeps the meta_leadgen_id so the cron's dedupe still recognizes it
+   * and won't re-process the lead on the next poll.
+   */
+  async function hideLead(id: string) {
+    const reason = window.prompt(
+      "Hide this lead? Pick a reason (or type your own):\n" +
+        HIDE_REASONS.map((r, i) => `${i + 1}. ${r}`).join("\n"),
+      "test_lead"
+    );
+    if (!reason) return;
+    // Allow the user to enter "1" / "2" etc. as a shortcut.
+    const trimmed = reason.trim();
+    const asNumber = parseInt(trimmed, 10);
+    const finalReason =
+      !isNaN(asNumber) && asNumber >= 1 && asNumber <= HIDE_REASONS.length
+        ? HIDE_REASONS[asNumber - 1]
+        : trimmed;
+
+    await patchLead(id, {
+      hidden: true,
+      hidden_reason: finalReason,
+    } as Partial<Lead>);
+  }
+
+  /** Restore a previously hidden lead. */
+  async function unhideLead(id: string) {
+    await patchLead(id, { hidden: false, hidden_reason: null } as Partial<Lead>);
   }
 
   function exportCSV() {
@@ -314,7 +357,7 @@ function Dashboard({
       </header>
 
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-        <AnalyticsPanel leads={leads} password={password} />
+        <AnalyticsPanel leads={visibleLeads} password={password} />
 
         <section className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
@@ -403,7 +446,8 @@ function Dashboard({
                         setExpanded(expanded === lead.id ? null : lead.id)
                       }
                       onPatch={(patch) => patchLead(lead.id, patch)}
-                      onDelete={() => deleteLead(lead.id)}
+                      onHide={() => hideLead(lead.id)}
+                      onUnhide={() => unhideLead(lead.id)}
                     />
                   ))}
               </tbody>
@@ -412,7 +456,20 @@ function Dashboard({
         </section>
 
         <div className="text-center text-xs text-neutral-600 pt-2">
-          {filtered.length} of {leads.length} leads shown · Auto-refresh disabled
+          {filtered.length} of {visibleLeads.length} leads shown
+          {hiddenCount > 0 && (
+            <>
+              {" · "}
+              <button
+                onClick={() => setShowHidden(!showHidden)}
+                className="text-pss-red hover:underline"
+              >
+                {showHidden
+                  ? `Hide ${hiddenCount} hidden leads`
+                  : `Show ${hiddenCount} hidden leads`}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </main>
@@ -424,13 +481,15 @@ function LeadRow({
   expanded,
   onToggle,
   onPatch,
-  onDelete,
+  onHide,
+  onUnhide,
 }: {
   lead: Lead;
   expanded: boolean;
   onToggle: () => void;
   onPatch: (patch: Partial<Lead>) => void;
-  onDelete: () => void;
+  onHide: () => void;
+  onUnhide: () => void;
 }) {
   const [notes, setNotes] = useState(lead.notes || "");
   useEffect(() => setNotes(lead.notes || ""), [lead.notes]);
@@ -438,7 +497,9 @@ function LeadRow({
   return (
     <>
       <tr
-        className="border-b border-pss-border/50 hover:bg-black/30 cursor-pointer"
+        className={`border-b border-pss-border/50 hover:bg-black/30 cursor-pointer ${
+          lead.hidden ? "opacity-50 italic" : ""
+        }`}
         onClick={(e) => {
           // don't toggle when clicking interactive elements
           if (
@@ -596,12 +657,27 @@ function LeadRow({
           >
             View
           </Link>
-          <button
-            onClick={onDelete}
-            className="text-xs text-red-400 hover:text-red-300"
-          >
-            Delete
-          </button>
+          {lead.hidden ? (
+            <button
+              onClick={onUnhide}
+              className="text-xs text-emerald-400 hover:text-emerald-300"
+              title={
+                lead.hidden_reason
+                  ? `Hidden — reason: ${lead.hidden_reason}`
+                  : "Hidden"
+              }
+            >
+              Unhide
+            </button>
+          ) : (
+            <button
+              onClick={onHide}
+              className="text-xs text-amber-400 hover:text-amber-300"
+              title="Soft-delete: lead stays in DB so the cron's dedupe still recognizes it"
+            >
+              Hide
+            </button>
+          )}
         </td>
       </tr>
       {expanded && (
