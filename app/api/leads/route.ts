@@ -41,6 +41,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Debug log for Vercel — see what's coming in
+  console.log("[/api/leads POST] Incoming body:", JSON.stringify(body, null, 2));
+
   const parent_name = str(body.parent_name);
   const player_name = str(body.player_name);
   const player_age_raw = body.player_age;
