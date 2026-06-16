@@ -187,6 +187,7 @@ function Dashboard({
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [showHidden, setShowHidden] = useState(false);
+  const [resending, setResending] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   async function loadLeads() {
@@ -288,6 +289,65 @@ function Dashboard({
     await patchLead(id, { hidden: false, hidden_reason: null } as Partial<Lead>);
   }
 
+  /**
+   * Re-fire the welcome WhatsApp to every opted-in lead that hasn't
+   * replied yet. Uses /api/whatsapp/resend-welcome-unconfirmed which
+   * deliberately bypasses the per-lead idempotency timestamps.
+   */
+  async function resendWelcomeToUnconfirmed() {
+    // First, do a dry-run preview so the admin sees who'd get hit.
+    setResending(true);
+    try {
+      const previewRes = await fetch(
+        `/api/whatsapp/resend-welcome-unconfirmed?password=${encodeURIComponent(
+          password
+        )}&dry_run=1`
+      );
+      const preview = await previewRes.json();
+      if (!previewRes.ok) {
+        alert(`Couldn't preview: ${preview.error || previewRes.status}`);
+        return;
+      }
+
+      const count = preview.recipient_count || 0;
+      if (count === 0) {
+        alert("🎉 Everyone has confirmed — nothing to nudge.");
+        return;
+      }
+
+      const sampleNames = (preview.recipients || [])
+        .slice(0, 5)
+        .map((r: any) => `  • ${r.name} (${r.phone})`)
+        .join("\n");
+      const more = count > 5 ? `\n  …and ${count - 5} more` : "";
+
+      const ok = window.confirm(
+        `Re-send the welcome WhatsApp to ${count} unconfirmed lead${count === 1 ? "" : "s"}?\n\n${sampleNames}${more}\n\nTemplate: ${preview.template}`
+      );
+      if (!ok) return;
+
+      const res = await fetch(
+        `/api/whatsapp/resend-welcome-unconfirmed?password=${encodeURIComponent(
+          password
+        )}`
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        alert(`Send failed: ${data.error || res.status}`);
+        return;
+      }
+      alert(
+        `✓ Sent ${data.sent} / ${data.total}` +
+          (data.failed > 0 ? `\n✗ ${data.failed} failed` : "")
+      );
+      await loadLeads(); // refresh the dashboard so badges update
+    } catch (err) {
+      alert(`Error: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setResending(false);
+    }
+  }
+
   function exportCSV() {
     const headers = [
       "created_at",
@@ -345,6 +405,14 @@ function Dashboard({
               className="px-3 py-1.5 text-sm rounded-md bg-pss-red hover:bg-pss-redhover transition font-medium"
             >
               Export CSV
+            </button>
+            <button
+              onClick={resendWelcomeToUnconfirmed}
+              disabled={resending}
+              title="Re-fires the welcome WhatsApp to every opted-in lead that hasn't replied yet"
+              className="px-3 py-1.5 text-sm rounded-md border border-pss-border hover:border-pss-red hover:bg-pss-panel transition disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {resending ? "Sending…" : "📱 Nudge unconfirmed"}
             </button>
             <button
               onClick={onLogout}
