@@ -84,6 +84,14 @@ export type Lead = {
    */
   welcome_whatsapp_sent_at?: string | null;
   /**
+   * When we last *nudged* this lead (re-sent the welcome to a non-replier).
+   * Used by the "Nudge unconfirmed" button to enforce a cooldown — we never
+   * nudge the same lead twice within the cooldown window.
+   */
+  last_nudged_at?: string | null;
+  /** How many times we've nudged this lead so far. Caps prevent spam. */
+  nudge_count?: number | null;
+  /**
    * Soft-delete flag. Hidden leads stay in the DB (so the cron's
    * meta_leadgen_id dedup still recognizes them and DOESN'T re-process),
    * but they're filtered out of the admin dashboard by default.

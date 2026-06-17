@@ -290,14 +290,15 @@ function Dashboard({
   }
 
   /**
-   * Re-fire the welcome WhatsApp to every opted-in lead that hasn't
-   * replied yet. Uses /api/whatsapp/resend-welcome-unconfirmed which
-   * deliberately bypasses the per-lead idempotency timestamps.
+   * Smart nudge — only re-fires the welcome WhatsApp to leads who are
+   * actually due. The endpoint enforces a cooldown (default 48h between
+   * contacts) and a max-nudges cap (default 3) so we don't spam people
+   * who got messaged yesterday.
    */
   async function resendWelcomeToUnconfirmed() {
-    // First, do a dry-run preview so the admin sees who'd get hit.
     setResending(true);
     try {
+      // Dry-run preview first
       const previewRes = await fetch(
         `/api/whatsapp/resend-welcome-unconfirmed?password=${encodeURIComponent(
           password
@@ -309,20 +310,37 @@ function Dashboard({
         return;
       }
 
-      const count = preview.recipient_count || 0;
-      if (count === 0) {
-        alert("🎉 Everyone has confirmed — nothing to nudge.");
+      const eligibleCount = preview.eligible_count || 0;
+      const totalUnconfirmed = preview.total_unconfirmed || 0;
+      const skipped = preview.skipped_breakdown || {};
+
+      if (eligibleCount === 0) {
+        const skipMsg = Object.entries(skipped)
+          .map(([reason, n]) => `  • ${reason}: ${n}`)
+          .join("\n");
+        alert(
+          totalUnconfirmed === 0
+            ? "🎉 Everyone has confirmed — nothing to nudge."
+            : `0 leads are due for a nudge right now.\n\n${totalUnconfirmed} unconfirmed lead${totalUnconfirmed === 1 ? "" : "s"} total, but all are skipped:\n${skipMsg}\n\nCooldown is ${preview.cooldown_hours}h between contacts.`
+        );
         return;
       }
 
-      const sampleNames = (preview.recipients || [])
+      const sampleNames = (preview.eligible || [])
         .slice(0, 5)
-        .map((r: any) => `  • ${r.name} (${r.phone})`)
+        .map(
+          (r: any) =>
+            `  • ${r.name} (${r.phone}) — nudge #${(r.nudge_count || 0) + 1}`
+        )
         .join("\n");
-      const more = count > 5 ? `\n  …and ${count - 5} more` : "";
+      const more =
+        eligibleCount > 5 ? `\n  …and ${eligibleCount - 5} more` : "";
+      const skipNote = preview.skipped_count
+        ? `\n\nSkipping ${preview.skipped_count} (in cooldown or capped at ${preview.max_nudges} nudges).`
+        : "";
 
       const ok = window.confirm(
-        `Re-send the welcome WhatsApp to ${count} unconfirmed lead${count === 1 ? "" : "s"}?\n\n${sampleNames}${more}\n\nTemplate: ${preview.template}`
+        `Nudge ${eligibleCount} unconfirmed lead${eligibleCount === 1 ? "" : "s"} who are due?\n\n${sampleNames}${more}${skipNote}\n\nCooldown: ${preview.cooldown_hours}h · Max nudges per lead: ${preview.max_nudges}`
       );
       if (!ok) return;
 
@@ -337,10 +355,11 @@ function Dashboard({
         return;
       }
       alert(
-        `✓ Sent ${data.sent} / ${data.total}` +
-          (data.failed > 0 ? `\n✗ ${data.failed} failed` : "")
+        `✓ Sent ${data.sent} / ${data.eligible_count}` +
+          (data.failed > 0 ? `\n✗ ${data.failed} failed` : "") +
+          `\n\nSkipped ${data.skipped_count} (in cooldown).`
       );
-      await loadLeads(); // refresh the dashboard so badges update
+      await loadLeads();
     } catch (err) {
       alert(`Error: ${err instanceof Error ? err.message : err}`);
     } finally {
