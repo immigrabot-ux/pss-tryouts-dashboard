@@ -371,11 +371,19 @@ function Dashboard({
         timestamp: data.timestamp,
       });
 
-      alert(
-        `✓ Sent ${data.sent} / ${data.eligible_count}` +
-          (data.failed > 0 ? `\n✗ ${data.failed} failed` : "") +
-          (data.skipped_count > 0 ? `\n\nSkipped ${data.skipped_count} (reminded within last 24 hours)` : "")
-      );
+      // Build result message with warnings
+      let message = `✓ Sent ${data.sent} / ${data.eligible_count}`;
+      if (data.failed > 0) message += `\n✗ ${data.failed} failed`;
+      if (data.skipped_count > 0)
+        message += `\n\nSkipped ${data.skipped_count} (reminded within last 24 hours)`;
+      if (data.not_processed > 0)
+        message += `\n\n⚠️  ${data.not_processed} not processed`;
+      if (data.circuit_breaker_tripped)
+        message += `\n\n🚨 Circuit breaker tripped - template parameter mismatch detected. Check logs.`;
+      if (data.timed_out)
+        message += `\n\n⏱️  Timeout - processing stopped at 55 seconds to avoid Vercel limit.`;
+
+      alert(message);
 
       // Step 5: Refresh data
       await loadLeads();
