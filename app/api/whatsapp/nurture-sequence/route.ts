@@ -46,10 +46,36 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  // DRY RUN MODE - default true until templates are created
-  const dryRun = process.env.NURTURE_DRY_RUN !== "false";
-
   const supabase = getSupabaseAdmin();
+
+  // Read configuration from database (not env vars!)
+  const { data: config, error: configError } = await supabase
+    .from("nurture_config")
+    .select("*")
+    .eq("id", 1)
+    .single();
+
+  if (configError) {
+    console.error("[nurture] config read failed:", configError);
+    return NextResponse.json(
+      { error: "config_read_failed", detail: configError.message },
+      { status: 500 }
+    );
+  }
+
+  // Check master pause flag
+  if (config.paused) {
+    console.log("[nurture] system paused - skipping run");
+    return NextResponse.json({
+      paused: true,
+      message: "Nurture system is paused",
+    });
+  }
+
+  const dryRun = config.dry_run;
+  const tryoutInfo = config.tryout_info;
+  const MAX_SENDS_PER_RUN = config.rate_limit_per_hour;
+
   const now = Date.now();
 
   // Timing thresholds (in milliseconds)
@@ -61,8 +87,6 @@ export async function GET(req: NextRequest) {
     nudged_to_urgency_low: 48 * 60 * 60 * 1000,     // 48h
     urgency_low_to_urgency_high: 96 * 60 * 60 * 1000, // 96h (4 days)
   };
-
-  const MAX_SENDS_PER_RUN = 30;
 
   // Fetch all active leads in the nurture sequence
   const { data: leads, error } = await supabase
@@ -252,7 +276,7 @@ export async function GET(req: NextRequest) {
       [
         lead.parent_name,
         lead.player_name || "your player",
-        process.env.TRYOUT_INFO || "the upcoming tryout",
+        tryoutInfo,
       ]
     );
 

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import AnalyticsPanel from "./_components/AnalyticsPanel";
+import NurtureControlPanel from "./_components/NurtureControlPanel";
 
 type Lead = {
   id: string;
@@ -197,6 +198,7 @@ function Dashboard({
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [nurtureStageFilter, setNurtureStageFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [showHidden, setShowHidden] = useState(false);
   const [resending, setResending] = useState(false);
@@ -258,6 +260,7 @@ function Dashboard({
     return visibleLeads.filter((l) => {
       if (statusFilter !== "all" && l.status !== statusFilter) return false;
       if (sourceFilter !== "all" && (l.source || "website") !== sourceFilter) return false;
+      if (nurtureStageFilter !== "all" && (l.nurture_stage || "new") !== nurtureStageFilter) return false;
       if (!q) return true;
       return (
         l.parent_name.toLowerCase().includes(q) ||
@@ -266,7 +269,7 @@ function Dashboard({
         l.parent_email.toLowerCase().includes(q)
       );
     });
-  }, [visibleLeads, statusFilter, sourceFilter, search]);
+  }, [visibleLeads, statusFilter, sourceFilter, nurtureStageFilter, search]);
 
   const hiddenCount = useMemo(
     () => leads.filter((l) => l.hidden).length,
@@ -502,6 +505,12 @@ function Dashboard({
       </header>
 
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+        <NurtureControlPanel
+          password={password}
+          activeFilter={nurtureStageFilter}
+          onStageClick={(stage) => setNurtureStageFilter(stage)}
+        />
+
         <AnalyticsPanel leads={visibleLeads} password={password} />
 
         {lastBatch && (
