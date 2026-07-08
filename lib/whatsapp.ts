@@ -17,6 +17,13 @@ export const WELCOME_TEMPLATE_NAME =
   process.env.WHATSAPP_WELCOME_TEMPLATE || "pss_welcome";
 
 /**
+ * Name of the "reminder" template to fire when nudging unconfirmed leads.
+ * Env-overridable for template versioning.
+ */
+export const REMINDER_TEMPLATE_NAME =
+  process.env.WHATSAPP_REMINDER_TEMPLATE || "pss_reminder";
+
+/**
  * Send a templated WhatsApp message via Meta Graph API.
  *
  * @param toPhone     Recipient phone in E.164 format (e.g. "15085551234"). Leading "+" is stripped.

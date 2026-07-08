@@ -189,6 +189,12 @@ function Dashboard({
   const [showHidden, setShowHidden] = useState(false);
   const [resending, setResending] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [unconfirmedCount, setUnconfirmedCount] = useState<number | null>(null);
+  const [lastBatch, setLastBatch] = useState<{
+    sent: number;
+    skipped: number;
+    timestamp: string;
+  } | null>(null);
 
   async function loadLeads() {
     setLoading(true);
@@ -210,8 +216,24 @@ function Dashboard({
 
   useEffect(() => {
     loadLeads();
+    loadUnconfirmedCount();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function loadUnconfirmedCount() {
+    try {
+      const res = await fetch(
+        `/api/whatsapp/send-reminder?password=${encodeURIComponent(password)}&dry_run=1`,
+        { cache: "no-store" }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setUnconfirmedCount(data.eligible_count || 0);
+      }
+    } catch (err) {
+      console.error("Failed to load unconfirmed count:", err);
+    }
+  }
 
   // Visible leads = non-hidden by default; "Show hidden" reveals everything.
   const visibleLeads = useMemo(
@@ -290,19 +312,19 @@ function Dashboard({
   }
 
   /**
-   * Smart nudge — only re-fires the welcome WhatsApp to leads who are
-   * actually due. The endpoint enforces a cooldown (default 48h between
-   * contacts) and a max-nudges cap (default 3) so we don't spam people
-   * who got messaged yesterday.
+   * Send reminder WhatsApp to unconfirmed leads using pss_reminder template.
+   * Queries DB on click for fresh count, shows confirmation, and prevents
+   * duplicate sends within 24 hours.
    */
   async function resendWelcomeToUnconfirmed() {
     setResending(true);
     try {
-      // Dry-run preview first
+      // Step 1: Query Supabase for current count (dry-run)
       const previewRes = await fetch(
-        `/api/whatsapp/resend-welcome-unconfirmed?password=${encodeURIComponent(
+        `/api/whatsapp/send-reminder?password=${encodeURIComponent(
           password
-        )}&dry_run=1`
+        )}&dry_run=1`,
+        { cache: "no-store" }
       );
       const preview = await previewRes.json();
       if (!previewRes.ok) {
@@ -312,54 +334,52 @@ function Dashboard({
 
       const eligibleCount = preview.eligible_count || 0;
       const totalUnconfirmed = preview.total_unconfirmed || 0;
-      const skipped = preview.skipped_breakdown || {};
+
+      // Update the count display
+      setUnconfirmedCount(eligibleCount);
 
       if (eligibleCount === 0) {
-        const skipMsg = Object.entries(skipped)
-          .map(([reason, n]) => `  • ${reason}: ${n}`)
-          .join("\n");
         alert(
           totalUnconfirmed === 0
-            ? "🎉 Everyone has confirmed — nothing to nudge."
-            : `0 leads are due for a nudge right now.\n\n${totalUnconfirmed} unconfirmed lead${totalUnconfirmed === 1 ? "" : "s"} total, but all are skipped:\n${skipMsg}\n\nCooldown is ${preview.cooldown_hours}h between contacts.`
+            ? "🎉 Everyone has confirmed — nothing to send."
+            : `0 leads eligible for reminder right now.\n\n${totalUnconfirmed} unconfirmed lead${totalUnconfirmed === 1 ? "" : "s"} total, but ${preview.skipped_count} skipped (reminded within last 24 hours).`
         );
         return;
       }
 
-      const sampleNames = (preview.eligible || [])
-        .slice(0, 5)
-        .map(
-          (r: any) =>
-            `  • ${r.name} (${r.phone}) — nudge #${(r.nudge_count || 0) + 1}`
-        )
-        .join("\n");
-      const more =
-        eligibleCount > 5 ? `\n  …and ${eligibleCount - 5} more` : "";
-      const skipNote = preview.skipped_count
-        ? `\n\nSkipping ${preview.skipped_count} (in cooldown or capped at ${preview.max_nudges} nudges).`
-        : "";
-
+      // Step 2: Show confirmation dialog with current count
       const ok = window.confirm(
-        `Nudge ${eligibleCount} unconfirmed lead${eligibleCount === 1 ? "" : "s"} who are due?\n\n${sampleNames}${more}${skipNote}\n\nCooldown: ${preview.cooldown_hours}h · Max nudges per lead: ${preview.max_nudges}`
+        `Send reminder WhatsApp to ${eligibleCount} unconfirmed lead${eligibleCount === 1 ? "" : "s"}?\n\nThis will use template pss_reminder.\n\n${preview.skipped_count > 0 ? `Skipping ${preview.skipped_count} (reminded within last 24 hours).\n\n` : ""}Continue?`
       );
       if (!ok) return;
 
+      // Step 3: Send the reminders
       const res = await fetch(
-        `/api/whatsapp/resend-welcome-unconfirmed?password=${encodeURIComponent(
-          password
-        )}`
+        `/api/whatsapp/send-reminder?password=${encodeURIComponent(password)}`,
+        { cache: "no-store" }
       );
       const data = await res.json();
       if (!res.ok) {
         alert(`Send failed: ${data.error || res.status}`);
         return;
       }
+
+      // Step 4: Update last batch info
+      setLastBatch({
+        sent: data.sent,
+        skipped: data.skipped_count,
+        timestamp: data.timestamp,
+      });
+
       alert(
         `✓ Sent ${data.sent} / ${data.eligible_count}` +
           (data.failed > 0 ? `\n✗ ${data.failed} failed` : "") +
-          `\n\nSkipped ${data.skipped_count} (in cooldown).`
+          (data.skipped_count > 0 ? `\n\nSkipped ${data.skipped_count} (reminded within last 24 hours)` : "")
       );
+
+      // Step 5: Refresh data
       await loadLeads();
+      await loadUnconfirmedCount();
     } catch (err) {
       alert(`Error: ${err instanceof Error ? err.message : err}`);
     } finally {
@@ -428,10 +448,14 @@ function Dashboard({
             <button
               onClick={resendWelcomeToUnconfirmed}
               disabled={resending}
-              title="Re-fires the welcome WhatsApp to every opted-in lead that hasn't replied yet"
+              title="Send reminder WhatsApp (pss_reminder template) to unconfirmed leads"
               className="px-3 py-1.5 text-sm rounded-md border border-pss-border hover:border-pss-red hover:bg-pss-panel transition disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {resending ? "Sending…" : "📱 Nudge unconfirmed"}
+              {resending
+                ? "Sending…"
+                : unconfirmedCount !== null
+                  ? `📱 Resend to ${unconfirmedCount} unconfirmed`
+                  : "📱 Resend to unconfirmed"}
             </button>
             <button
               onClick={onLogout}
@@ -445,6 +469,21 @@ function Dashboard({
 
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
         <AnalyticsPanel leads={visibleLeads} password={password} />
+
+        {lastBatch && (
+          <div className="bg-pss-panel border border-pss-border rounded-md px-4 py-3 text-sm">
+            <div className="flex items-center gap-2 text-neutral-400">
+              <span className="font-medium">Last resend batch:</span>
+              <span className="text-green-400">{lastBatch.sent} sent</span>
+              <span className="text-neutral-500">•</span>
+              <span className="text-amber-400">{lastBatch.skipped} skipped</span>
+              <span className="text-neutral-500">•</span>
+              <span className="text-neutral-500">
+                at {new Date(lastBatch.timestamp).toLocaleString()}
+              </span>
+            </div>
+          </div>
+        )}
 
         <section className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">

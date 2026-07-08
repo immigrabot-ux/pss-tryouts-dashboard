@@ -92,6 +92,11 @@ export type Lead = {
   /** How many times we've nudged this lead so far. Caps prevent spam. */
   nudge_count?: number | null;
   /**
+   * When we last sent a reminder WhatsApp (using pss_reminder template).
+   * Used to enforce a 24-hour guard against duplicate reminder sends.
+   */
+  last_reminder_sent_at?: string | null;
+  /**
    * Soft-delete flag. Hidden leads stay in the DB (so the cron's
    * meta_leadgen_id dedup still recognizes them and DOESN'T re-process),
    * but they're filtered out of the admin dashboard by default.
