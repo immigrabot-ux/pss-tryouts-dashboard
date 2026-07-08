@@ -393,14 +393,22 @@ export async function GET(req: NextRequest) {
       // Persist WhatsApp send status only when WE actually sent it. If we
       // skipped (already sent earlier), leave the existing status alone.
       if (waClaimed && lead.whatsapp_opt_in) {
+        const updateData: Record<string, any> = {
+          whatsapp_send_status: waResult.ok ? "sent" : "failed",
+          whatsapp_send_error: waResult.ok
+            ? null
+            : (waResult as any).error || "unknown error",
+        };
+
+        // If welcome send succeeded, initialize nurture sequence
+        if (waResult.ok) {
+          updateData.nurture_stage = "welcomed";
+          updateData.last_nurture_sent_at = new Date().toISOString();
+        }
+
         await supabase
           .from("leads")
-          .update({
-            whatsapp_send_status: waResult.ok ? "sent" : "failed",
-            whatsapp_send_error: waResult.ok
-              ? null
-              : (waResult as any).error || "unknown error",
-          })
+          .update(updateData)
           .eq("id", lead.id);
       }
 

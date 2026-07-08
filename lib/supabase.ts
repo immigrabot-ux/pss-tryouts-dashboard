@@ -97,6 +97,21 @@ export type Lead = {
    */
   last_reminder_sent_at?: string | null;
   /**
+   * Current stage in automated nurture sequence.
+   * Values: 'new', 'welcomed', 'nudged', 'urgency_low', 'urgency_high', 'converted', 'stopped'
+   */
+  nurture_stage?: string | null;
+  /**
+   * When we last sent a nurture message (any stage).
+   * Used to enforce spacing between nurture messages.
+   */
+  last_nurture_sent_at?: string | null;
+  /**
+   * Why the nurture sequence was stopped.
+   * e.g. "replied", "opted_out", "dead_lead", "manual_stop"
+   */
+  nurture_sequence_stopped_reason?: string | null;
+  /**
    * Soft-delete flag. Hidden leads stay in the DB (so the cron's
    * meta_leadgen_id dedup still recognizes them and DOESN'T re-process),
    * but they're filtered out of the admin dashboard by default.

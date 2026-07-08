@@ -5,6 +5,10 @@
       "schedule": "0 14 * * *"
     },
     {
+      "path": "/api/whatsapp/nurture-sequence",
+      "schedule": "0 * * * *"
+    },
+    {
       "path": "/api/meta/poll-leads",
       "schedule": "* * * * *"
     }

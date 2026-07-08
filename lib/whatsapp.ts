@@ -24,6 +24,17 @@ export const REMINDER_TEMPLATE_NAME =
   process.env.WHATSAPP_REMINDER_TEMPLATE || "pss_reminder";
 
 /**
+ * Automated nurture sequence templates.
+ * These escalate in urgency over time if lead doesn't reply.
+ */
+export const NURTURE_TEMPLATES = {
+  nudge: process.env.WHATSAPP_NUDGE_TEMPLATE || "pss_nudge",
+  urgency_low: process.env.WHATSAPP_URGENCY_LOW_TEMPLATE || "pss_urgency_low",
+  urgency_high: process.env.WHATSAPP_URGENCY_HIGH_TEMPLATE || "pss_urgency_high",
+  final_call: process.env.WHATSAPP_FINAL_CALL_TEMPLATE || "pss_final_call",
+} as const;
+
+/**
  * Send a templated WhatsApp message via Meta Graph API.
  *
  * @param toPhone     Recipient phone in E.164 format (e.g. "15085551234"). Leading "+" is stripped.

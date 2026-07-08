@@ -22,6 +22,8 @@ type Lead = {
   whatsapp_send_status?: string | null;
   whatsapp_send_error?: string | null;
   source?: string | null;
+  nurture_stage?: string | null;
+  nurture_sequence_stopped_reason?: string | null;
   hidden?: boolean | null;
   hidden_reason?: string | null;
   notes: string | null;
@@ -65,6 +67,16 @@ const STATUS_COLORS: Record<string, string> = {
   registered: "bg-pss-red/20 text-red-300 border-pss-red/40",
   no_show: "bg-neutral-700/30 text-neutral-300 border-neutral-600/40",
   dropped: "bg-neutral-700/30 text-neutral-400 border-neutral-600/40",
+};
+
+const NURTURE_STAGE_COLORS: Record<string, string> = {
+  new: "bg-neutral-500/15 text-neutral-300 border-neutral-500/30",
+  welcomed: "bg-blue-500/15 text-blue-300 border-blue-500/30",
+  nudged: "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",
+  urgency_low: "bg-orange-500/15 text-orange-300 border-orange-500/30",
+  urgency_high: "bg-red-500/15 text-red-300 border-red-500/30",
+  converted: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+  stopped: "bg-neutral-900/40 text-neutral-500 border-neutral-800/40",
 };
 
 const LS_KEY = "pss-admin-password";
@@ -311,6 +323,20 @@ function Dashboard({
     await patchLead(id, { hidden: false, hidden_reason: null } as Partial<Lead>);
   }
 
+  /** Stop the automated nurture sequence for a lead. */
+  async function stopNurture(id: string) {
+    const reason = window.prompt(
+      "Stop nurture sequence for this lead?\n\nReason:\n- opted_out (parent asked not to contact)\n- dead_lead (not responsive)\n- manual_stop (other)\n\nEnter reason:",
+      "opted_out"
+    );
+    if (!reason) return;
+
+    await patchLead(id, {
+      nurture_stage: "stopped",
+      nurture_sequence_stopped_reason: reason.trim(),
+    } as Partial<Lead>);
+  }
+
   /**
    * Send reminder WhatsApp to unconfirmed leads using pss_reminder template.
    * Queries DB on click for fresh count, shows confirmation, and prevents
@@ -544,6 +570,7 @@ function Dashboard({
                   <th className="px-4 py-3 font-medium">Phone</th>
                   <th className="px-4 py-3 font-medium">Email</th>
                   <th className="px-4 py-3 font-medium">WhatsApp</th>
+                  <th className="px-4 py-3 font-medium">Nurture</th>
                   <th className="px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 font-medium">Notes</th>
                   <th className="px-4 py-3 font-medium text-right">Actions</th>
@@ -553,7 +580,7 @@ function Dashboard({
                 {loading && (
                   <tr>
                     <td
-                      colSpan={11}
+                      colSpan={12}
                       className="px-4 py-10 text-center text-neutral-500"
                     >
                       Loading leads…
@@ -563,7 +590,7 @@ function Dashboard({
                 {!loading && filtered.length === 0 && (
                   <tr>
                     <td
-                      colSpan={11}
+                      colSpan={12}
                       className="px-4 py-10 text-center text-neutral-500"
                     >
                       No leads match your filters.
@@ -582,6 +609,7 @@ function Dashboard({
                       onPatch={(patch) => patchLead(lead.id, patch)}
                       onHide={() => hideLead(lead.id)}
                       onUnhide={() => unhideLead(lead.id)}
+                      onStopNurture={() => stopNurture(lead.id)}
                     />
                   ))}
               </tbody>
@@ -617,6 +645,7 @@ function LeadRow({
   onPatch,
   onHide,
   onUnhide,
+  onStopNurture,
 }: {
   lead: Lead;
   expanded: boolean;
@@ -624,6 +653,7 @@ function LeadRow({
   onPatch: (patch: Partial<Lead>) => void;
   onHide: () => void;
   onUnhide: () => void;
+  onStopNurture: () => void;
 }) {
   const [notes, setNotes] = useState(lead.notes || "");
   useEffect(() => setNotes(lead.notes || ""), [lead.notes]);
@@ -756,6 +786,21 @@ function LeadRow({
           })()}
         </td>
         <td className="px-4 py-3">
+          {(() => {
+            const stage = lead.nurture_stage || "new";
+            const color = NURTURE_STAGE_COLORS[stage] || NURTURE_STAGE_COLORS.new;
+            const displayName = stage.replace(/_/g, " ");
+            return (
+              <span
+                className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${color}`}
+                title={lead.nurture_sequence_stopped_reason ? `Stopped: ${lead.nurture_sequence_stopped_reason}` : undefined}
+              >
+                {displayName}
+              </span>
+            );
+          })()}
+        </td>
+        <td className="px-4 py-3">
           <select
             value={lead.status}
             onChange={(e) => onPatch({ status: e.target.value })}
@@ -791,6 +836,15 @@ function LeadRow({
           >
             View
           </Link>
+          {lead.nurture_stage !== "stopped" && lead.nurture_stage !== "converted" && (
+            <button
+              onClick={onStopNurture}
+              className="text-xs text-red-400 hover:text-red-300 mr-3"
+              title="Stop automated nurture sequence"
+            >
+              Stop nurture
+            </button>
+          )}
           {lead.hidden ? (
             <button
               onClick={onUnhide}
@@ -816,7 +870,7 @@ function LeadRow({
       </tr>
       {expanded && (
         <tr className="bg-black/20 border-b border-pss-border/50">
-          <td colSpan={11} className="px-6 py-4">
+          <td colSpan={12} className="px-6 py-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <Field label="Lead ID" value={lead.id} />
               <Field

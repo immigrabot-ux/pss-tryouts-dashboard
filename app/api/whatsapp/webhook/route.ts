@@ -121,7 +121,7 @@ async function handleInbound(fromDigits: string, text: string) {
     return;
   }
 
-  // First-time replier → confirm them.
+  // First-time replier → confirm them and convert nurture sequence.
   if (!lead.whatsapp_confirmed) {
     const { error: updErr } = await supabase
       .from("leads")
@@ -130,6 +130,8 @@ async function handleInbound(fromDigits: string, text: string) {
         whatsapp_confirmed_at: new Date().toISOString(),
         whatsapp_opt_in: true,
         whatsapp_send_status: "confirmed",
+        nurture_stage: "converted",
+        nurture_sequence_stopped_reason: "replied",
       })
       .eq("id", lead.id);
 
