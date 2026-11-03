@@ -14,7 +14,7 @@ export type WATemplateParam = string;
  * resubmitting under the Utility category) without touching code.
  */
 export const WELCOME_TEMPLATE_NAME =
-  process.env.WHATSAPP_WELCOME_TEMPLATE || "pss_welcome";
+  process.env.WHATSAPP_WELCOME_TEMPLATE || "pss_welcome_v3";
 
 /**
  * Name of the "reminder" template to fire when nudging unconfirmed leads.

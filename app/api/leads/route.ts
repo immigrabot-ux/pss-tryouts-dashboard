@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { sendWelcomeEmail, sendAdminNotification } from "@/lib/email";
+import { notifyNewLead } from "@/lib/commandCenter";
 import { sendWhatsAppTemplate, WELCOME_TEMPLATE_NAME } from "@/lib/whatsapp";
 import { logActivity } from "@/lib/activity";
 import { isAdminPassword, unauthorized } from "@/lib/auth";
@@ -59,6 +60,8 @@ export async function POST(req: NextRequest) {
   if (!["day1", "day2", "both"].includes(tryout_day)) tryout_day = "both";
   // Source tracking — "website", "meta_lead_ad", etc. Default to "website".
   const source = str(body.source) || "website";
+  // True when the form already sent the WhatsApp welcome during the phone check.
+  const welcomeAlreadySent = body.whatsapp_welcome_sent === true;
 
   // validation
   const missing: string[] = [];
@@ -140,6 +143,9 @@ export async function POST(req: NextRequest) {
     source,
   };
   if (age_group) insertRow.age_group = age_group;
+  // What the family wants: "winter" | "spring" | "both" (from the website interest list).
+  const interest = str(body.interest).toLowerCase();
+  if (["winter", "spring", "both"].includes(interest)) insertRow.interest = interest;
 
   const { data, error } = await supabase
     .from("leads")
@@ -155,6 +161,15 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       )
     );
+  }
+
+  // Instant text from Command Center (only if they checked the texting-consent box).
+  if (source !== "meta_lead_ad") {
+    await notifyNewLead({
+      source: "site_tryout", name: parent_name, phone: parent_phone, email: parent_email,
+      child: player_name, child_age: (data as { player_age?: number }).player_age ?? null,
+      sms_consent: body.sms_opt_in === true,
+    });
   }
 
   // IDEMPOTENCY — claim the welcome-email and welcome-whatsapp slots
@@ -179,7 +194,7 @@ export async function POST(req: NextRequest) {
           skipped?: boolean;
         }),
     sendAdminNotification(data),
-    waClaimed
+    waClaimed && !welcomeAlreadySent
       ? sendWhatsAppTemplate(data.parent_phone, WELCOME_TEMPLATE_NAME, [
           data.parent_name,
           data.player_name,

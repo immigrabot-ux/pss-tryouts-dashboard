@@ -23,6 +23,8 @@ export function getSupabaseAdmin(): SupabaseClient {
       persistSession: false,
       autoRefreshToken: false,
     },
+    // Never let Next/Vercel cache database reads (a cached read made the email sender see stale data).
+    global: { fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, cache: "no-store" }) },
   });
 
   return _serverClient;
@@ -69,6 +71,8 @@ export type Lead = {
   whatsapp_send_status?: "sent" | "failed" | "confirmed" | string | null;
   /** Last Meta error message if the send failed. */
   whatsapp_send_error?: string | null;
+  /** What the family signed up for on the interest list: "winter" | "spring" | "both". */
+  interest?: string | null;
   /** Lead source: "website", "meta_lead_ad", etc. */
   source?: string | null;
   /** Meta Lead Ads leadgen_id for deduplication during polling */

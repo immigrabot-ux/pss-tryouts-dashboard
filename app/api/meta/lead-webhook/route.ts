@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { sendWelcomeEmail, sendAdminNotification } from "@/lib/email";
+import { notifyNewLead, metaSmsConsent, META_LEAD_FIELDS } from "@/lib/commandCenter";
 import { sendWhatsAppTemplate, WELCOME_TEMPLATE_NAME } from "@/lib/whatsapp";
 import { logActivity } from "@/lib/activity";
 import {
@@ -11,6 +12,7 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store"; // never reuse old Meta responses
 
 /**
  * GET /api/meta/lead-webhook
@@ -136,11 +138,11 @@ async function processOneLead({
   // Step 1 — fetch full lead details from Meta Graph API
   const detailUrl = `https://graph.facebook.com/v18.0/${encodeURIComponent(
     leadgenId
-  )}?access_token=${encodeURIComponent(accessToken)}`;
+  )}?fields=${META_LEAD_FIELDS}&access_token=${encodeURIComponent(accessToken)}`;
 
   let detail: any;
   try {
-    const res = await fetch(detailUrl);
+    const res = await fetch(detailUrl, { cache: "no-store" });
     detail = await res.json();
     if (!res.ok) {
       console.error("[meta-leads] graph API error:", detail?.error || res.status);
@@ -261,6 +263,12 @@ async function processOneLead({
   console.log(
     `[meta-leads] inserted lead ${data.id} from Meta leadgen_id=${leadgenId}`
   );
+
+  // Instant text from Command Center (only if they checked the texting-consent box).
+  await notifyNewLead({
+    source: "meta", name: parent_name, phone: parent_phone, email: parent_email,
+    child: player_name, child_age: player_age, sms_consent: metaSmsConsent(detail),
+  });
 
   // Step 5 — IDEMPOTENT welcome flow. We could race with the cron poll
   // for the same lead, so claim the slots atomically before sending.

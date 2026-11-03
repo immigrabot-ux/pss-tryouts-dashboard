@@ -117,6 +117,9 @@ export default function TryoutForm() {
           parent_phone: form.parent_phone.trim(),
           parent_email: form.parent_email.trim(),
           whatsapp_opt_in: form.whatsapp_opt_in,
+          // The welcome already went out when the phone was checked — don't send it twice.
+          whatsapp_welcome_sent:
+            !!lastVerifiedPhone && lastVerifiedPhone === form.parent_phone.trim(),
         }),
       });
 

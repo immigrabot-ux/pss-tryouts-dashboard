@@ -78,7 +78,15 @@ export async function POST(req: NextRequest) {
   const fallbackUA = req.headers.get("user-agent") || null;
   const fallbackReferrer = req.headers.get("referer") || null;
 
-  const rows = rawEvents.map((e) => normalizeEvent(e, { ip, fallbackUA, fallbackReferrer }));
+  // Vercel adds the visitor's approximate location to every request.
+  const dec = (v: string | null) => { try { return v ? decodeURIComponent(v) : null; } catch { return v; } };
+  const geo = {
+    city: dec(req.headers.get("x-vercel-ip-city")),
+    region: req.headers.get("x-vercel-ip-country-region"),
+    country: req.headers.get("x-vercel-ip-country"),
+  };
+
+  const rows = rawEvents.map((e) => normalizeEvent(e, { ip, fallbackUA, fallbackReferrer, geo }));
 
   // Filter out events with no event_type — they're invalid
   const validRows = rows.filter((r) => !!r.event_type);
@@ -112,8 +120,13 @@ export async function POST(req: NextRequest) {
 // Map a raw incoming event to our column shape.
 function normalizeEvent(
   e: any,
-  ctx: { ip: string | null; fallbackUA: string | null; fallbackReferrer: string | null }
+  ctx: { ip: string | null; fallbackUA: string | null; fallbackReferrer: string | null; geo?: { city: string | null; region: string | null; country: string | null } }
 ) {
+  // The website sends where the visitor came from inside traffic_source (document.referrer + UTM tags).
+  // The request's own Referer header is just our website page, so it's only a last resort.
+  const ts = e && typeof e.traffic_source === "object" && e.traffic_source ? e.traffic_source : {};
+  const di = e && typeof e.device_info === "object" && e.device_info ? e.device_info : {};
+
   // Pull known fields off
   const known = {
     event_type: str(e.event_type || e.type || e.eventType || e.name),
@@ -125,19 +138,19 @@ function normalizeEvent(
     page_path: str(e.page_path || e.path || e.pathname),
     page_url: str(e.page_url || e.url || e.href),
     page_title: str(e.page_title || e.title),
-    referrer: str(e.referrer || ctx.fallbackReferrer),
+    referrer: str(e.referrer || ts.referrer || ctx.fallbackReferrer),
 
-    utm_source: str(e.utm_source || e.utmSource),
-    utm_medium: str(e.utm_medium || e.utmMedium),
-    utm_campaign: str(e.utm_campaign || e.utmCampaign),
-    utm_term: str(e.utm_term || e.utmTerm),
-    utm_content: str(e.utm_content || e.utmContent),
+    utm_source: str(e.utm_source || e.utmSource || ts.utm_source),
+    utm_medium: str(e.utm_medium || e.utmMedium || ts.utm_medium),
+    utm_campaign: str(e.utm_campaign || e.utmCampaign || ts.utm_campaign),
+    utm_term: str(e.utm_term || e.utmTerm || ts.utm_term),
+    utm_content: str(e.utm_content || e.utmContent || ts.utm_content),
 
-    user_agent: str(e.user_agent || e.userAgent || ctx.fallbackUA),
-    device_type: str(e.device_type || e.deviceType),
-    country: str(e.country),
-    region: str(e.region || e.state),
-    city: str(e.city),
+    user_agent: str(e.user_agent || e.userAgent || di.user_agent || ctx.fallbackUA),
+    device_type: str(e.device_type || e.deviceType || deviceType(di)),
+    country: str(e.country || ctx.geo?.country),
+    region: str(e.region || e.state || ctx.geo?.region),
+    city: str(e.city || ctx.geo?.city),
     ip: ctx.ip,
   };
 
@@ -173,6 +186,13 @@ function normalizeEvent(
   }
 
   return { ...known, properties };
+}
+
+function deviceType(di: any): string {
+  const ua = String(di?.user_agent || "");
+  if (/iPad|Tablet/i.test(ua)) return "tablet";
+  if (/Mobi|iPhone|Android/i.test(ua)) return "mobile";
+  return ua ? "desktop" : "";
 }
 
 function str(v: unknown): string {

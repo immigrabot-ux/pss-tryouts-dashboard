@@ -64,6 +64,12 @@ async function handleEvent(payload: unknown) {
       const value = change.value || {};
       const messages: any[] = value.messages || [];
 
+      // Delivery receipts (delivered / read / failed) for messages we sent.
+      for (const st of (value.statuses || []) as any[]) {
+        if (!["delivered", "read", "failed"].includes(st.status)) continue;
+        await handleStatus(st);
+      }
+
       for (const msg of messages) {
         const fromRaw: string = msg.from || "";
         const from = normalizePhone(fromRaw);
@@ -115,7 +121,7 @@ async function handleInbound(fromDigits: string, text: string) {
     if (process.env.AI_AUTO_REPLY_ENABLED === "true") {
       await sendWhatsAppText(
         fromDigits,
-        "Hi! Thanks for reaching out to Peace Soccer School. I don't have your tryout signup on file yet — could you reply with your child's name so Coach Mina can take a look? ⚽"
+        "Hi! Thanks for reaching out to Peace Soccer School ⚽ Winter indoor registration is open: peacesoccerschool.com/register/winter-2026. What's your child's name and age? Coach Mina will take a look."
       );
     }
     return;
@@ -153,6 +159,16 @@ async function handleInbound(fromDigits: string, text: string) {
   // Log the inbound message itself.
   await logActivity(lead.id, "whatsapp", "inbound", text || null, true);
 
+  // Opt-out: "STOP" (or similar) turns off WhatsApp marketing for this parent. No AI reply.
+  if (/^\s*(stop|stop promotions|unsubscribe|cancel|opt out|optout)\s*[.!]*\s*$/i.test(text || "")) {
+    await supabase.from("leads").update({ whatsapp_opt_in: false }).eq("id", lead.id);
+    await logActivity(lead.id, "whatsapp", "opt_out", text, true);
+    const msg = "Got it, you won't get any more updates from us here. If you ever have a question, just message us. 🙏";
+    const r = await sendWhatsAppText(lead.parent_phone, msg);
+    await logActivity(lead.id, "whatsapp", "ai_reply", r.ok ? msg : `${msg}\n\n[send error: ${r.error}]`, r.ok);
+    return;
+  }
+
   // AI auto-reply — only if enabled and we have a real message to react to.
   if (process.env.AI_AUTO_REPLY_ENABLED !== "true") return;
   if (!text || text.trim().length === 0) return;
@@ -177,4 +193,26 @@ async function handleInbound(fromDigits: string, text: string) {
     sent.ok ? ai.reply : `${ai.reply}\n\n[send error: ${sent.error}]`,
     sent.ok
   );
+}
+
+
+/** Log WhatsApp delivery receipts so the Command Center can show delivered / read / failed. */
+async function handleStatus(st: any) {
+  try {
+    const to = normalizePhone(String(st.recipient_id || ""));
+    if (!to) return;
+    const last10 = to.slice(-10);
+    const supabase = getSupabaseAdmin();
+    const { data: candidates } = await supabase.from("leads").select("id, parent_phone");
+    const lead = (candidates || []).find((row: any) => {
+      const d = normalizePhone(row.parent_phone || "");
+      return d && d.slice(-10) === last10;
+    });
+    if (!lead) return;
+    const err = st.errors?.[0];
+    const detail = err ? `${err.code ?? ""} ${err.title ?? err.message ?? ""}`.trim() : String(st.id || "");
+    await logActivity(lead.id, "whatsapp", `status_${st.status}`, detail, st.status !== "failed");
+  } catch (e) {
+    console.warn("[whatsapp] status log failed", e);
+  }
 }

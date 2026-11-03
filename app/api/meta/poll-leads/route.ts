@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { sendWelcomeEmail, sendAdminNotification } from "@/lib/email";
+import { notifyNewLead, metaSmsConsent, META_LEAD_FIELDS } from "@/lib/commandCenter";
 import { sendWhatsAppTemplate, WELCOME_TEMPLATE_NAME } from "@/lib/whatsapp";
 import { logActivity } from "@/lib/activity";
 import {
@@ -10,6 +11,7 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store"; // never reuse old Meta responses
 export const maxDuration = 60; // Allow up to 60 seconds for polling large batches
 
 /**
@@ -66,7 +68,7 @@ export async function GET(req: NextRequest) {
   let newLeads = 0;
   let skipped = 0;
   const errors: string[] = [];
-  const formsPolled: { id: string; name: string; leadCount: number }[] = [];
+  const formsPolled: { id: string; name: string; leadCount: number; via?: string }[] = [];
 
   try {
     // Step A — figure out which forms to poll.
@@ -85,7 +87,7 @@ export async function GET(req: NextRequest) {
         const formMetaUrl = `https://graph.facebook.com/v18.0/${encodeURIComponent(
           envFormIds[0]
         )}?fields=page&access_token=${encodeURIComponent(accessToken)}`;
-        const res = await fetch(formMetaUrl);
+        const res = await fetch(formMetaUrl, { cache: "no-store" });
         const data = await res.json();
         if (res.ok && data?.page?.id) {
           effectivePageId = data.page.id;
@@ -103,14 +105,31 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Listing a Page's lead forms needs a *Page* access token. If the configured
+    // token is a system-user or user token, exchange it for the Page token first.
+    let pageToken = accessToken;
+    if (effectivePageId) {
+      try {
+        const r = await fetch(
+          `https://graph.facebook.com/v18.0/${encodeURIComponent(effectivePageId)}?fields=access_token&access_token=${encodeURIComponent(accessToken)}`,
+          { cache: "no-store" }
+        );
+        const j = await r.json();
+        if (r.ok && j?.access_token) pageToken = j.access_token;
+        else console.warn("[meta-poll] Page token exchange failed:", j?.error?.message || r.statusText);
+      } catch (err) {
+        console.warn("[meta-poll] Page token exchange error:", err);
+      }
+    }
+
     if (effectivePageId) {
       let nextFormsUrl: string | null = `https://graph.facebook.com/v18.0/${encodeURIComponent(
         effectivePageId
       )}/leadgen_forms?fields=id,name,status&access_token=${encodeURIComponent(
-        accessToken
+        pageToken
       )}`;
       while (nextFormsUrl) {
-        const res: Response = await fetch(nextFormsUrl);
+        const res: Response = await fetch(nextFormsUrl, { cache: "no-store" });
         const data = await res.json();
         if (!res.ok) {
           errors.push(
@@ -143,13 +162,18 @@ export async function GET(req: NextRequest) {
 
     // Step B — fetch leads from each form (paginated, capped per form).
     const allLeads: any[] = [];
+    const tokensToTry = pageToken !== accessToken ? [pageToken, accessToken] : [accessToken];
     for (const form of formsToPoll) {
       let formLeadCount = 0;
+      let via = "page";
+      for (const [ti, tok] of tokensToTry.entries()) {
+      if (formLeadCount > 0) break;
+      via = ti === 0 && pageToken !== accessToken ? "page" : "configured";
       let nextUrl: string | null = `https://graph.facebook.com/v18.0/${encodeURIComponent(
         form.id
-      )}/leads?access_token=${encodeURIComponent(accessToken)}`;
+      )}/leads?fields=${META_LEAD_FIELDS}&access_token=${encodeURIComponent(tok)}`;
       while (nextUrl) {
-        const res: Response = await fetch(nextUrl);
+        const res: Response = await fetch(nextUrl, { cache: "no-store" });
         const data = await res.json();
         if (!res.ok) {
           errors.push(
@@ -176,11 +200,13 @@ export async function GET(req: NextRequest) {
           break;
         }
       }
+      }
       formsPolled.push({
         id: form.id,
         name: form.name,
         leadCount: formLeadCount,
-      });
+        via,
+      } as any);
     }
 
     console.log(
@@ -315,6 +341,12 @@ export async function GET(req: NextRequest) {
 
       console.log(`[meta-poll] Inserted new lead ${lead.id} from ${leadgenId}`);
       newLeads++;
+
+      // Instant text from Command Center (only if they checked the texting-consent box).
+      await notifyNewLead({
+        source: "meta", name: parent_name, phone: parent_phone, email: parent_email,
+        child: player_name, child_age: player_age, sms_consent: metaSmsConsent(metaLead),
+      });
 
       // IDEMPOTENCY — claim the welcome-email and welcome-whatsapp slots
       // atomically before sending. If either is already claimed (another

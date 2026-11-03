@@ -11,6 +11,26 @@
     {
       "path": "/api/meta/poll-leads",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/winter/welcome",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/winter/whatsapp-launch",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/campaign/send",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/winter/payment-reminders",
+      "schedule": "7 * * * *"
+    },
+    {
+      "path": "/api/winter/lead-nurture",
+      "schedule": "23 * * * *"
     }
   ]
 }

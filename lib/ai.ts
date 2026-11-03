@@ -1,146 +1,55 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Lead } from "./supabase";
-import {
-  TRYOUT_DAYS,
-  TRYOUT_LOCATION,
-  daysForSelection,
-  selectionLabel,
-} from "./tryout-config";
+import { getSupabaseAdmin } from "./supabase";
+import { getPssBrain, pssClaude } from "./pss-brain";
 
 /**
- * Generate a context-aware WhatsApp auto-reply for an incoming parent message.
+ * WhatsApp auto-reply. Uses the shared PSS brain (same facts + voice as the
+ * Facebook/Instagram AI in the Command Center), plus this parent's details
+ * and their recent WhatsApp conversation.
  *
- * Voice: warm, casual, like Coach Mina. 1–2 sentence replies.
- * Knows: tryout details, parent + player names, child age.
- * Won't promise: roster spots, fees, refunds, weather decisions, medical things.
- * Escalates: "Coach Mina will get back to you on that personally" for sensitive topics.
+ * The old Fall-2026-tryout prompt is kept in lib/ai.old-fall2026.ts.txt for reference.
  */
 export async function generateAIReply(
   lead: Lead,
   incomingMessage: string
 ): Promise<{ ok: boolean; reply?: string; error?: string }> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return { ok: false, error: "ANTHROPIC_API_KEY not set" };
-  }
-
+  if (!apiKey) return { ok: false, error: "ANTHROPIC_API_KEY not set" };
   const client = new Anthropic({ apiKey });
 
-  // Which day(s) is this parent attending?
-  const selectedDays = daysForSelection(lead.tryout_day);
-  const selLabel = selectionLabel(lead.tryout_day);
-  const today = new Date();
-  const todayNice = today.toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    timeZone: "America/New_York",
-  });
+  const brain = await getPssBrain();
+  const { recent: history, lastOlder } = await loadHistory(lead.id);
 
-  // Use the FIRST day they're attending as the temporal anchor.
-  const anchorDay = selectedDays[0];
-  const [ty, tm, td] = anchorDay.date
-    .split("-")
-    .map((n) => parseInt(n, 10));
-  const anchorMs = Date.UTC(ty, tm - 1, td);
-  const todayMs = Date.UTC(
-    today.getUTCFullYear(),
-    today.getUTCMonth(),
-    today.getUTCDate()
-  );
-  const daysUntil = Math.round((anchorMs - todayMs) / (1000 * 60 * 60 * 24));
-  const niceDate = anchorDay.displayDate;
+  // A child name equal to the parent's name (or empty) is a form mistake — don't use it.
+  const childName =
+    lead.player_name && lead.player_name.trim().toLowerCase() !== (lead.parent_name || "").trim().toLowerCase()
+      ? lead.player_name
+      : null;
 
-  let temporalFraming: string;
-  if (daysUntil > 14) {
-    temporalFraming = `The first tryout day is ${daysUntil} days away. Speak in absolute date terms (e.g. "${niceDate}", "July 25th"). Do NOT use words like "this Saturday", "this weekend", "soon", "coming up", "tomorrow", or anything implying imminence.`;
-  } else if (daysUntil > 3) {
-    temporalFraming = `The first tryout day is ${daysUntil} days away — coming up but not immediate. You can say things like "next ${getDayOfWeek(anchorDay.date)}" or "${niceDate}".`;
-  } else if (daysUntil > 1) {
-    temporalFraming = `The first tryout day is in ${daysUntil} days. You can say "this ${getDayOfWeek(anchorDay.date)}" or "in ${daysUntil} days".`;
-  } else if (daysUntil === 1) {
-    temporalFraming = `The first tryout day is TOMORROW. Use "tomorrow" naturally.`;
-  } else if (daysUntil === 0) {
-    temporalFraming = `The first tryout day is TODAY. Use "today" naturally.`;
-  } else {
-    temporalFraming = `The tryouts have already started or passed. Tactfully address this.`;
+  const channel = `
+THIS CONVERSATION: WhatsApp.
+- Parent: ${lead.parent_name || "unknown"}
+- Child: ${childName ? `${childName}${lead.player_age ? ` (age ${lead.player_age})` : ""}` : "not known yet (ask their child's name and age naturally)"}
+- How they found us: ${lead.source === "meta_lead_ad" ? "a Facebook/Instagram ad form" : "the website form"}, ${new Date(lead.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "America/New_York" })}
+${lastOlder ? `- Earlier history: this parent last messaged us on ${lastOlder}. That older conversation is NOT shown and may mention events that are now over. Treat this as a fresh conversation.` : ""}
+- If they originally signed up for something that is now over (like the July 2026 Fall tryouts), only mention it if it helps, kindly, and point them to what's next.
+- Never apologize for or "correct" earlier messages unless the parent brings them up.
+- If our last message was the Winter registration announcement, they are probably replying to it: help them pick Winter and register, answer questions, and keep it short.
+- Plain text only: this is a WhatsApp message, no markdown.
+
+Reply with only the message text.`;
+
+  const messages = [...history];
+  // The webhook logs the inbound message before calling us; avoid sending it twice.
+  const last = messages[messages.length - 1];
+  if (!(last && last.role === "user" && last.content === incomingMessage)) {
+    messages.push({ role: "user", content: incomingMessage });
   }
 
-  // Render the full two-day schedule + which the parent picked.
-  const fullScheduleStr = TRYOUT_DAYS.map(
-    (d) =>
-      `  • ${d.label} — ${d.displayDate}, ${d.displayTime} at ${TRYOUT_LOCATION}`
-  ).join("\n");
-
-  const selectedSchedule =
-    selectedDays.length === 1
-      ? `${selectedDays[0].label} only — ${selectedDays[0].displayDate}, ${selectedDays[0].displayTime}`
-      : `BOTH days — ${TRYOUT_DAYS.map(
-          (d) => `${d.label} (${d.displayDate}, ${d.displayTime})`
-        ).join(" AND ")}`;
-
-  const systemPrompt = `You are Coach Mina's AI assistant for Peace Soccer School (PSS), responding to parents on WhatsApp about their child's Fall 2026 tryout. You speak FOR Coach Mina in his voice.
-
-CURRENT DATE & TIME CONTEXT (THIS IS CRITICAL — DO NOT IGNORE):
-- Today is ${todayNice}.
-- ${temporalFraming}
-
-TRYOUT SCHEDULE — TWO DAYS:
-${fullScheduleStr}
-
-THIS PARENT'S SELECTION: ${selectedSchedule}
-- Only reference the day(s) this parent picked. Don't push them to attend a day they didn't sign up for.
-- If they ask about the OTHER day, you can mention it factually but don't pressure them to switch or add.
-
-VOICE:
-- Warm, casual, friendly — like a real youth soccer coach who knows the family.
-- 1-2 sentences max. WhatsApp messages, not emails.
-- Occasional ⚽ emoji is fine, don't overdo it. No other emojis unless responding to the parent's tone.
-- Refer to the player by first name. Use the parent's first name once if it feels natural.
-- Sign off naturally — usually no signature needed, but "— Coach Mina" is fine occasionally.
-
-WHAT YOU KNOW (use as needed, don't dump it all):
-- Parent: ${lead.parent_name}
-- Player: ${lead.player_name} (age ${lead.player_age})
-- Selection: ${selLabel}
-- Location: ${TRYOUT_LOCATION}
-- What to bring: cleats, shin guards, water bottle, soccer ball if they have one
-- WhatsApp confirmed status: ${lead.whatsapp_confirmed ? "confirmed" : "first contact"}
-
-WHAT YOU WILL NOT DO:
-- Don't invent dates or imply imminence — re-read the temporal framing above before responding.
-- Don't make up fees, prices, payment terms, or refund policies. If asked: "Coach Mina will get back to you on pricing personally."
-- Don't promise a roster spot, playing time, or team placement.
-- Don't make weather/cancellation calls. If asked about weather: "We'll send an update by the night before if anything changes."
-- Don't give medical, injury, or special-needs guidance. Escalate: "Let me have Coach Mina reach out directly about that."
-- Don't reschedule the tryout or commit Coach Mina to a different time/place. Say: "I'll have Coach Mina reach out to set that up."
-- Don't discuss other families, other players, or anything not about THIS parent's child.
-- Don't refer to the player as he/she unless the parent has used a pronoun first — use the player's name or "they".
-
-IF YOU CAN'T ANSWER OR THE QUESTION IS SENSITIVE: Always default to "Coach Mina will get back to you on that personally" or similar. Better to escalate than to make something up.
-
-RESPONSE FORMAT: Just the WhatsApp message text. No JSON, no preamble, no quotes around it.`;
-
   try {
-    const response = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 300,
-      system: systemPrompt,
-      messages: [
-        {
-          role: "user",
-          content: `Parent ${lead.parent_name} just sent this WhatsApp message:\n\n"${incomingMessage}"\n\nReply to them as Coach Mina would.`,
-        },
-      ],
-    });
-
-    const textBlock = response.content.find((b) => b.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      return { ok: false, error: "Empty response from Claude" };
-    }
-
-    const reply = textBlock.text.trim();
+    const reply = await pssClaude(client, { system: brain.prompt + "\n" + channel, messages, max_tokens: 300 });
+    if (!reply) return { ok: false, error: "Empty response from Claude" };
     return { ok: true, reply };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -149,29 +58,48 @@ RESPONSE FORMAT: Just the WhatsApp message text. No JSON, no preamble, no quotes
   }
 }
 
-function formatNiceDate(iso: string): string {
+/** WhatsApp messages with this parent from the last 7 days (max 12), oldest first.
+ *  Older messages are left out on purpose: they're usually about past events. */
+async function loadHistory(
+  leadId: string
+): Promise<{ recent: { role: "user" | "assistant"; content: string }[]; lastOlder: string | null }> {
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   try {
-    const [year, month, day] = iso.split("-").map((n) => parseInt(n, 10));
-    return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      timeZone: "UTC",
-    });
-  } catch {
-    return iso;
-  }
-}
+    const sb = getSupabaseAdmin();
+    const { data } = await sb
+      .from("lead_activities")
+      .select("kind, detail, created_at")
+      .eq("lead_id", leadId)
+      .eq("channel", "whatsapp")
+      .in("kind", ["inbound", "ai_reply", "manual_reply", "winter_open"])
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(12);
+    const { data: older } = await sb
+      .from("lead_activities")
+      .select("created_at")
+      .eq("lead_id", leadId)
+      .eq("channel", "whatsapp")
+      .in("kind", ["inbound", "ai_reply"])
+      .lt("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const lastOlder = older?.[0]?.created_at
+      ? new Date(older[0].created_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "America/New_York" })
+      : null;
 
-function getDayOfWeek(iso: string): string {
-  try {
-    const [year, month, day] = iso.split("-").map((n) => parseInt(n, 10));
-    return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", {
-      weekday: "long",
-      timeZone: "UTC",
-    });
+    const rows = (data || []).reverse().filter((r: any) => r.detail).map((r: any) => ({ ...r, detail: String(r.detail).replace(/\s*phone:\d+$/, "") }));
+    const out: { role: "user" | "assistant"; content: string }[] = [];
+    for (const r of rows as any[]) {
+      const role = r.kind === "inbound" ? "user" : "assistant";
+      const prev = out[out.length - 1];
+      if (prev && prev.role === role) prev.content += "\n" + r.detail;
+      else out.push({ role, content: r.detail });
+    }
+    // Claude needs to start with the parent. If we messaged first (e.g. the Winter announcement), keep it as context.
+    if (out.length && out[0].role === "assistant") out.unshift({ role: "user", content: "(We messaged this parent first. Their reply follows.)" });
+    return { recent: out, lastOlder };
   } catch {
-    return "Saturday";
+    return { recent: [], lastOlder: null };
   }
 }

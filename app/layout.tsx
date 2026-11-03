@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "PSS Tryouts — Admin",
-  description: "Peace Soccer School Fall 2026 tryouts management.",
+  description: "Peace Soccer School leads and tryouts management.",
 };
 
 export default function RootLayout({
