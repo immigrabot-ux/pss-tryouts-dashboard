@@ -167,7 +167,9 @@ const WINTER_PRICE = "$300, or $275 early bird through Nov 14. Siblings save 15%
 const WINTER_URL = "https://www.peacesoccerschool.com/winter-indoor-soccer";
 
 function welcomeEmailHTML(lead: Lead): string {
-  const kid = escapeHTML(lead.player_name || "your player");
+  // Meta lead forms don't ask for the child's name, so it's often stored as "(unknown)".
+  const rawKid = (lead.player_name || "").trim();
+  const kid = escapeHTML(rawKid && rawKid !== "(unknown)" ? rawKid : "your player");
   return `<!doctype html>
 <html>
   <body style="margin:0;padding:0;background:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#f5f5f5;">
