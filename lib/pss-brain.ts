@@ -15,25 +15,28 @@ const CACHE_MS = 5 * 60 * 1000;
 export const PSS_AI_MODEL = process.env.PSS_AI_MODEL || "claude-sonnet-5-5";
 const FALLBACK_MODEL = "claude-sonnet-4-5-20250929";
 
-const OFFLINE_BRAIN = `You are the assistant for Peace Soccer School (PSS), a Christian competitive youth soccer club for boys and girls ages 5–13 in Rehoboth, MA, replying to parents for Coach Mina. Be warm, casual and short (1–3 sentences), reply in the parent's language. Winter indoor training (Dec–Jan, Teamworks Seekonk) and Spring 2027 are coming up; registration details are on https://www.peacesoccerschool.com. Never invent dates, prices or policies: if you aren't sure, say Coach Mina will get back to them personally.`;
+const OFFLINE_BRAIN = `You are the assistant for Peace Soccer School (PSS), a Christian competitive youth soccer club for boys and girls ages 5–13 in Rehoboth, MA, replying to parents for Coach Mina. Be warm, casual and very short (1–2 sentences), never pushy, reply in the parent's language. Winter indoor training is on Saturday nights, 7–9 PM, at Teamworks, 1314 Fall River Ave, Seekonk, MA, from Nov 21 to Mar 6; details and sign-up at https://www.peacesoccerschool.com/winter-indoor-soccer. Spring 2027 details aren't set yet. Never invent dates, prices or policies: if you aren't sure, say Coach Mina will get back to them personally.`;
 
 let cached: { prompt: string; version: string; at: number } | null = null;
 
 export async function getPssBrain(): Promise<{ prompt: string; version: string }> {
   if (cached && Date.now() - cached.at < CACHE_MS) return cached;
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 4000);
-    const res = await fetch(BRAIN_URL, { cache: "no-store", signal: ctrl.signal });
-    clearTimeout(t);
-    const j = await res.json();
-    if (res.ok && typeof j?.prompt === "string" && j.prompt.length > 200) {
-      cached = { prompt: j.prompt, version: String(j.version || "?"), at: Date.now() };
-      return cached;
+  // The website can be slow to wake up, so allow 9s and try twice.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 9000);
+      const res = await fetch(BRAIN_URL, { cache: "no-store", signal: ctrl.signal });
+      clearTimeout(t);
+      const j = await res.json();
+      if (res.ok && typeof j?.prompt === "string" && j.prompt.length > 200) {
+        cached = { prompt: j.prompt, version: String(j.version || "?"), at: Date.now() };
+        return cached;
+      }
+      console.warn("[pss-brain] bad response", res.status);
+    } catch (err) {
+      console.warn(`[pss-brain] fetch failed (attempt ${attempt}):`, err instanceof Error ? err.message : err);
     }
-    console.warn("[pss-brain] bad response", res.status);
-  } catch (err) {
-    console.warn("[pss-brain] fetch failed:", err instanceof Error ? err.message : err);
   }
   // Use the last good brain if we have one, otherwise a safe minimal one.
   return cached ?? { prompt: OFFLINE_BRAIN, version: "offline" };
