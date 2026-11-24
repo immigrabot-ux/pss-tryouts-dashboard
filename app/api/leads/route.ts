@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { TRYOUT_ANCHOR_DATE } from "@/lib/tryout-config";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { sendWelcomeEmail, sendAdminNotification } from "@/lib/email";
 import { notifyNewLead } from "@/lib/commandCenter";
@@ -126,8 +127,9 @@ export async function POST(req: NextRequest) {
 
   // Anchor lead's tryout_date on the first day they're attending — used by
   // the reminder cron to bucket T-3 / T-1 / today.
-  const anchorDate =
-    tryout_day === "day2" ? "2026-07-26" : "2026-07-25";
+  // Spring 2027 tryout sign-ups (tryouts page) anchor on Feb 13 so the T-3/T-1/today reminders fire.
+  // Other website forms keep the old past date, so they never get tryout reminders.
+  const anchorDate = body.tryout_signup === true ? TRYOUT_ANCHOR_DATE : "2026-07-25";
 
   const insertRow: Record<string, unknown> = {
     parent_name,

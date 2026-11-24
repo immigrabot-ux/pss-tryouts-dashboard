@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { TRYOUT_LOCATION, TRYOUT_TIME_LABEL } from "@/lib/tryout-config";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { sendWhatsAppTemplate } from "@/lib/whatsapp";
 import { logActivity } from "@/lib/activity";
@@ -39,8 +40,8 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = getSupabaseAdmin();
-  const location = process.env.TRYOUT_LOCATION || "Bliss Fields, Rehoboth MA";
-  const time = process.env.TRYOUT_TIME || "09:00";
+  const location = TRYOUT_LOCATION;
+  const time = TRYOUT_TIME_LABEL;
 
   const today = todayISO();
   const t1 = addDays(today, 1);
