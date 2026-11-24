@@ -117,8 +117,8 @@ function buildTryoutICS(lead: Lead): Promise<string | null> {
       const durationMinutes = day.endMinute - day.startMinute;
 
       return {
-        title: `PSS Tryout ${day.label} — ${lead.player_name}`,
-        description: `Peace Soccer School Fall 2026 Tryout (${day.label} of 2) for ${lead.player_name} (age ${lead.player_age}). ${day.displayTime}. See you on the pitch! — Coach Mina`,
+        title: `PSS ${day.label} — ${lead.player_name}`,
+        description: `Peace Soccer School ${day.label} for ${lead.player_name} (age ${lead.player_age}). ${day.displayTime}. Bring cleats or turf shoes, shin guards and water. See you there! — Coach Mina`,
         location: TRYOUT_LOCATION,
         start: [year, month, dom, day.startHour, day.startMinute],
         // "local" → ics library emits the time as floating local time, so
@@ -157,19 +157,19 @@ function buildTryoutICS(lead: Lead): Promise<string | null> {
 }
 
 /**
- * Welcome email for anyone who joins the list (website form or Meta lead ad).
- * Fall 2026 tryouts are over, so this is about what's next: Winter indoor, then Spring 2027.
- * Update the WINTER_* lines when the season details change.
+ * Welcome email for anyone who joins the list (website forms or Meta lead ads).
+ * Winter is full, so this is about Spring 2027: tryouts on Feb 13 and the 2027 prices.
  */
-const WINTER_LINE = "14 Saturday nights, Nov 21 – Mar 6, 7–9 PM";
-const WINTER_PLACE = "Teamworks, 1314 Fall River Ave, Seekonk (indoor turf)";
-const WINTER_PRICE = "$300, or $275 early bird through Nov 14. Siblings save 15%.";
-const WINTER_URL = "https://www.peacesoccerschool.com/winter-indoor-soccer";
+const TRYOUT_LINE = "Saturday, February 13, 2027 · 7–9 PM";
+const TRYOUT_PLACE = "Teamworks, 1314 Fall River Ave, Seekonk (indoor turf)";
+const TRYOUTS_URL = "https://www.peacesoccerschool.com/tryouts";
+const PRICING_URL = "https://www.peacesoccerschool.com/pricing";
 
 function welcomeEmailHTML(lead: Lead): string {
   // Meta lead forms don't ask for the child's name, so it's often stored as "(unknown)".
   const rawKid = (lead.player_name || "").trim();
   const kid = escapeHTML(rawKid && rawKid !== "(unknown)" ? rawKid : "your player");
+  const row = (t: string) => `<div style="font-size:15px;color:#d4d4d4;margin-bottom:6px;">${t}</div>`;
   return `<!doctype html>
 <html>
   <body style="margin:0;padding:0;background:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#f5f5f5;">
@@ -187,20 +187,25 @@ function welcomeEmailHTML(lead: Lead): string {
               <td style="padding:28px;">
                 <p style="margin:0 0 16px;font-size:16px;line-height:1.6;color:#e5e5e5;">Hi ${escapeHTML(lead.parent_name)},</p>
                 <p style="margin:0 0 16px;font-size:16px;line-height:1.6;color:#e5e5e5;">
-                  Thanks for your interest in Peace Soccer School! We've added <strong>${kid}</strong> to our list, and good news: Winter registration is open right now.
+                  Thanks for your interest in Peace Soccer School! We've added <strong>${kid}</strong> to our list for Spring 2027 tryouts.
                 </p>
                 <div style="background:#0a0a0a;border:1px solid #1f1f1f;border-radius:10px;padding:18px 20px;margin:0 0 12px;">
-                  <div style="font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#60a5fa;font-weight:700;margin-bottom:8px;">Up next: Winter indoor training</div>
-                  <div style="font-size:15px;color:#fff;margin-bottom:6px;">📅 ${WINTER_LINE}</div>
-                  <div style="font-size:15px;color:#d4d4d4;margin-bottom:6px;">📍 ${WINTER_PLACE}</div>
-                  <div style="font-size:15px;color:#d4d4d4;">💵 ${WINTER_PRICE}</div>
+                  <div style="font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#60a5fa;font-weight:700;margin-bottom:8px;">Spring 2027 tryouts</div>
+                  <div style="font-size:15px;color:#fff;margin-bottom:6px;">📅 ${TRYOUT_LINE}</div>
+                  ${row(`📍 ${TRYOUT_PLACE}`)}
+                  ${row("👟 Bring cleats or turf shoes, shin guards and water. Every age (5–13) and level is welcome.")}
+                </div>
+                <div style="background:#0a0a0a;border:1px solid #1f1f1f;border-radius:10px;padding:18px 20px;margin:0 0 12px;">
+                  <div style="font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#60a5fa;font-weight:700;margin-bottom:8px;">2027 prices</div>
+                  ${row("Spring or Fall season: $499 paid in full, or $599 on a payment plan")}
+                  ${row("With uniform: $699 paid in full, or $799 on a payment plan")}
+                  ${row("Summer Academy: $300 · Winter indoor: $300")}
+                  ${row("Full year, all 4 programs: $1,600 paid in full, or 8 payments of $250")}
+                  ${row("Siblings save 15%.")}
                 </div>
                 <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#d4d4d4;">
-                  Winter is limited to 50 kids, ages 5–13. Sign up in about 3 minutes here: <a href="https://www.peacesoccerschool.com/register/winter-2026" style="color:#60a5fa;font-weight:700;">peacesoccerschool.com/register/winter-2026</a>
-                  Details are here: <a href="${WINTER_URL}" style="color:#60a5fa;">peacesoccerschool.com/winter-indoor-soccer</a>
-                </p>
-                <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#d4d4d4;">
-                  Our competitive Spring 2027 season comes after that, and we'll share tryout details soon.
+                  Details: <a href="${TRYOUTS_URL}" style="color:#60a5fa;font-weight:700;">peacesoccerschool.com/tryouts</a> · <a href="${PRICING_URL}" style="color:#60a5fa;">pricing</a>.
+                  Our Winter indoor program is full this season.
                 </p>
                 <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#d4d4d4;">
                   Questions? Just reply to this email, or call or text (774) 250-2370.
@@ -304,7 +309,7 @@ export async function sendWelcomeEmail(lead: Lead): Promise<{ ok: boolean; error
     const info = await transport.sendMail({
       from: `"${FROM_NAME}" <${FROM_EMAIL}>`,
       to: lead.parent_email,
-      subject: "Welcome to Peace Soccer School ⚽ What's next for your player",
+      subject: "You're on the list for PSS Spring 2027 tryouts (Feb 13) ⚽",
       html: welcomeEmailHTML(lead),
     });
 

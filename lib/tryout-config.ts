@@ -1,5 +1,5 @@
 /**
- * Single source of truth for the Fall 2026 tryout schedule.
+ * Single source of truth for the tryout schedule (Spring 2027 tryouts: Feb 13, Teamworks Seekonk).
  *
  * Update only this file when dates/times change — everything else (homepage,
  * email, .ics, AI prompt, reminders) reads from here.
@@ -18,29 +18,19 @@ export type TryoutDay = {
 
 export const TRYOUT_DAYS: TryoutDay[] = [
   {
-    label: "Day 1",
-    date: "2026-07-25",
-    startHour: 10,
+    label: "Spring 2027 tryouts",
+    date: "2027-02-13",
+    startHour: 19,
     startMinute: 0,
-    endHour: 12,
+    endHour: 21,
     endMinute: 0,
-    displayDate: "Saturday, July 25, 2026",
-    displayTime: "10:00 AM – 12:00 PM",
-  },
-  {
-    label: "Day 2",
-    date: "2026-07-26",
-    startHour: 16,
-    startMinute: 0,
-    endHour: 18,
-    endMinute: 0,
-    displayDate: "Sunday, July 26, 2026",
-    displayTime: "4:00 PM – 6:00 PM",
+    displayDate: "Saturday, February 13, 2027",
+    displayTime: "7:00 PM – 9:00 PM",
   },
 ];
 
 export const TRYOUT_LOCATION =
-  process.env.TRYOUT_LOCATION || "Bliss Fields, Rehoboth MA";
+  "Teamworks, 1314 Fall River Ave, Seekonk, MA";
 
 /** First tryout day — used as the canonical "tryout_date" anchor for reminders. */
 export const TRYOUT_ANCHOR_DATE = TRYOUT_DAYS[0].date;
@@ -59,7 +49,7 @@ export function daysForSelection(
 ): TryoutDay[] {
   const sel = (selection || "both").toLowerCase();
   if (sel === "day1") return [TRYOUT_DAYS[0]];
-  if (sel === "day2") return [TRYOUT_DAYS[1]];
+  if (sel === "day2") return [TRYOUT_DAYS[1] ?? TRYOUT_DAYS[0]];
   return TRYOUT_DAYS;
 }
 
@@ -67,7 +57,11 @@ export function selectionLabel(
   selection: string | null | undefined
 ): string {
   const sel = (selection || "both").toLowerCase();
+  if (TRYOUT_DAYS.length === 1) return TRYOUT_DAYS[0].displayDate;
   if (sel === "day1") return "Day 1 only";
   if (sel === "day2") return "Day 2 only";
   return "Both days";
 }
+
+/** Display time used in WhatsApp reminders. */
+export const TRYOUT_TIME_LABEL = "7:00 PM";
